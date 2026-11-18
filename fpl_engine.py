@@ -1024,6 +1024,10 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         if name in ("bboost", "3xc"):
             # Prefer an earlier week when it is almost as good: less risk of injuries or the window closing.
             best_gw, best_val, _ = next(v for v in vals if v[1] >= best_val - 0.5)
+            if best_gw == stop:  # the final week leaves no fallback if something goes wrong
+                earlier = [v for v in vals if v[0] < stop and v[1] >= best_val - 1.5]
+                if earlier:
+                    best_gw, best_val, _ = max(earlier, key=lambda v: v[1])
         now_val = vals[0][1] if vals[0][0] == next_gw else 0.0
         if name == "wildcard":
             problems = sum(1 for s in sell_list if s["severity"] >= 3)
