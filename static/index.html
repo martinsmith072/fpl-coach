@@ -271,7 +271,7 @@ function actItem(a){
 function overview(){
   const caps=D.captaincy.map((p,i)=>`<tr><td>${i+1}. <b>${esc(p.name)}</b> <span class="muted small">${esc(p.team)}</span></td><td class="small">${esc(fxNext(p))}</td><td class="num"><b>${fmt(p.xpts_next)}</b></td><td class="num">${fmt(p.selected)}%</td><td class="small muted">${esc(p.eo_note)}</td></tr>`).join("");
   const chips=D.chips.filter(c=>!["used","expired"].includes(c.status)).map(c=>`<div class="sig"><span class="pill ${c.status}">${esc(c.label)}</span>${c.rec_label?` <b class="small">Best: ${esc(c.rec_label)}</b>`:""} <span class="small">${esc(c.verdict)}</span></div>`).join("");
-  return head()+`<div class="grid g2">
+  return head()+briefCard(false)+`<div class="grid g2">
   <div class="card"><h2>Your GW${D.meta.next_gw} game plan</h2><ul class="acts">${D.actions.map(actItem).join("")}</ul>
    <div class="note">${D.meta.notes.map(esc).join("<br>")}</div></div>
   <div class="card"><h2>Captaincy shortlist</h2><div class="scroll"><table><tr><th>Player</th><th>Fixture</th><th class="num">xPts</th><th class="num">Owned</th><th></th></tr>${caps}</table></div>
@@ -475,6 +475,20 @@ function history(){
   ${[...g].reverse().map(x=>`<tr><td>${x.gw}</td><td class="num"><b>${x.points}</b></td><td class="num">${x.avg??"–"}</td><td class="num">${x.bench}</td><td class="num">${x.transfers}</td><td class="num">${x.hits?"−"+x.hits:""}</td><td>${x.chip?`<span class="pill">${esc(x.chip)}</span>`:""}</td><td class="num">${big(x.overall_rank)}</td></tr>`).join("")}</table></div></div>`;
 }
 
+function briefCard(full){
+  const B=D.briefing||{};
+  if(!B.summary&&!(B.players||[]).length){
+    return full?`<div class="card" style="margin-bottom:14px"><h2>Claude's team-news briefing</h2><p class="small muted">${B.stale?`The last briefing was for GW${B.gameweek}. A new one is written after the press conferences, at 15:00 on the day before the deadline.`:"No briefing yet. One is written at 15:00 on the day before each deadline, after the press conferences."}</p></div>`:"";
+  }
+  const when=B.generated_at?new Date(B.generated_at).toLocaleString("en-GB",{weekday:"short",hour:"2-digit",minute:"2-digit"}):"";
+  const pl=(B.players||[]).filter(p=>full||p.mine);
+  const rows=pl.map(p=>{const c=p.start_chance;const cls=c==null?"":c<=40?"bad":c<=70?"warn":"good";
+    return `<div class="sig"><span class="pill ${cls}">${c==null?"–":c+"%"}</span> <b class="${p.mine?"mine":""}">${esc(p.name)}</b> <span class="muted small">${esc(p.team)} · ${p.pos} · ${esc(p.confidence||"")} confidence</span>${p.mine?'<span class="tag">yours</span>':""}
+     <div class="small">${esc(p.verdict||"")}</div>${(p.sources||[]).length?`<div class="small muted">${p.sources.slice(0,3).map(s=>s.link?`<a href="${esc(s.link)}" target="_blank" rel="noopener">${esc(s.source||s.title||"source")}</a>`:esc(s.source||s.title||"")).join(" · ")}</div>`:""}</div>`}).join("");
+  return `<div class="card" style="margin-bottom:14px"><h2>Claude's team-news briefing <span class="small muted">${esc(when)}</span></h2>
+   <p class="small">${esc(B.summary||"")}</p>${rows||'<p class="small muted">Nothing affecting your players.</p>'}
+   <div class="note">Written by Claude from the latest press-conference reports, club and fan-site news. Start chances feed into this gameweek's projections, weighted by confidence.</div></div>`;
+}
 function compCard(){
   const C=D.competition||[];
   const rows=C.length?`<div class="scroll"><table><tr><th>Player at risk</th><th>Who's back</th></tr>${C.map(c=>`<tr><td class="${c.mine?"mine":""}">${esc(c.name)} <span class="muted small">${esc(c.team)} · ${c.pos}</span>${c.mine?'<span class="tag">yours</span>':""}</td><td>${esc(c.returner)} <span class="muted small">£${fmt(c.returner_price)}m · fit, yet to return</span></td></tr>`).join("")}</table></div>`
@@ -503,7 +517,7 @@ function signals(){
     const xph=new Map([...D.players,...D.squad].map(p=>[p.id,p]));
     const mom=k=>S.momentum[k].map(p=>{const v=xph.get(p.id);return `<tr><td>${lab(p)}${plan.has(p.id)?'<span class="tag">in your plan</span>':""}${p.status!=="a"?` <span class="pill ${p.chance<=25?"bad":"warn"}" title="${esc(p.news)}">${p.chance}%</span>`:""}</td><td class="num">£${fmt(p.price)}</td><td class="num">${big(p.count)}</td><td class="num" style="color:${p.net>0?"var(--good)":"var(--bad)"}">${p.net>0?"+":""}${big(p.net)}</td><td class="num">${v?fmt(v.xpts_h):"–"}</td></tr>`}).join("");
     const momHead=`<tr><th>Player</th><th class="num">£</th><th class="num">${"%K%"}</th><th class="num">Net</th><th class="num">xPts ${D.meta.transfer_horizon}GW</th></tr>`;
-    body=`<div class="grid g2" style="margin-bottom:14px">
+    body=`${briefCard(true)}<div class="grid g2" style="margin-bottom:14px">
     <div class="card"><h2>Most bought this GW</h2><div class="scroll"><table>${momHead.replace("%K%","In")}${mom("in")}</table></div></div>
     <div class="card"><h2>Most sold this GW</h2><div class="scroll"><table>${momHead.replace("%K%","Out")}${mom("out")}</table></div></div></div>
     ${compCard()}

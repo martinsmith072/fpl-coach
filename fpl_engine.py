@@ -339,9 +339,11 @@ def fixture_points(r: PlayerRates, rules: Dict[str, Any], att_mult: float, lam_a
 class Projector:
     def __init__(self, bootstrap: Dict[str, Any], fx: FixtureIndex, horizon: List[int],
                  recent: Optional[Dict[int, Dict[str, Any]]] = None, core: Optional[Dict[str, Any]] = None,
-                 competition: Optional[Dict[int, Dict[str, Any]]] = None):
+                 competition: Optional[Dict[int, Dict[str, Any]]] = None,
+                 briefing: Optional[Dict[int, Tuple[float, float]]] = None):
         self.fx = fx
         self.competition = competition or {}
+        self.briefing = briefing or {}  # pid -> (start chance 0-1 from the team-news briefing, weight)
         self.recent = recent or {}
         self.total_players = max(_f(bootstrap.get("total_players"), 10_000_000), 1.0)
         self.core = core
@@ -372,6 +374,12 @@ class Projector:
         out: List[float] = []
         for k, ev in enumerate(self.horizon):
             av = availability(p, k)
+            if k == 0 and p["id"] in self.briefing:
+                # Blend the briefing's start chance with the model's, weighted by its confidence.
+                target, weight = self.briefing[p["id"]]
+                model_start = r.start_rate * av
+                blended = weight * target + (1 - weight) * model_start
+                av = _clip(blended / max(r.start_rate, 0.05), 0.0, min(1.5, 1.0 / max(r.start_rate, 0.05)))
             total = 0.0
             for g in self.fx.get(team, ev):
                 if g["opp"] not in self.tm.A:
@@ -400,6 +408,7 @@ class Projector:
 
 REGULAR_PRICE = {1: 5.0, 2: 5.0, 3: 6.0, 4: 6.5}  # a player this pricey is normally a first-choice starter
 DISPLACED_START_MULT = 0.65  # chance of starting kept by a stand-in when the regular is back
+BRIEFING_WEIGHT = {"high": 0.9, "medium": 0.6, "low": 0.3}  # how much a team-news verdict overrides the model
 
 
 def competition_for_places(elements: Dict[int, Dict[str, Any]], core: Optional[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
@@ -738,7 +747,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                  transfers: Optional[List[Dict[str, Any]]] = None,
                  notes: Optional[List[str]] = None,
                  recent: Optional[Dict[int, Dict[str, Any]]] = None,
-                 core: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 core: Optional[Dict[str, Any]] = None,
+                 briefing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     notes = list(notes or [])
     events = bootstrap.get("events") or []
     ev_by_id = {e["id"]: e for e in events}
@@ -771,7 +781,16 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         return f"{recent[pid]['starts']}/{recent[pid]['games']}" if pid in recent else None
 
     competition = competition_for_places(elements, core)
-    proj = Projector(bootstrap, fx, horizon, recent, core, competition)
+    # Team-news briefing written by Claude from the collected news (only for this gameweek).
+    brief = briefing if briefing and briefing.get("gameweek") == next_gw else None
+    brief_players = {int(b["id"]): b for b in (brief or {}).get("players") or [] if int(b.get("id", 0)) in elements}
+    brief_adj: Dict[int, Tuple[float, float]] = {}
+    for pid_b, b in brief_players.items():
+        if b.get("start_chance") is None:
+            continue
+        weight = BRIEFING_WEIGHT.get(str(b.get("confidence", "medium")).lower(), 0.6)
+        brief_adj[pid_b] = (_clip(_f(b["start_chance"]) / 100.0, 0.0, 1.0), weight)
+    proj = Projector(bootstrap, fx, horizon, recent, core, competition, brief_adj)
     xpts = proj.xpts
     total_players = int(_f(bootstrap.get("total_players"), 10_000_000))
 
@@ -985,7 +1004,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     # Chips are judged over their whole window (up to 9 weeks ahead), so project further than usual.
     CHIP_LOOK = 9
     chip_h = list(range(next_gw, min(last_gw, next_gw + CHIP_LOOK - 1 + TRANSFER_HORIZON - 1) + 1))
-    lp = Projector(bootstrap, fx, chip_h, recent, core, competition).xpts
+    lp = Projector(bootstrap, fx, chip_h, recent, core, competition, brief_adj).xpts
     chip_weeks = chip_h[:CHIP_LOOK]
     mv_best = plan["best"]["moves"]
     after = list(squad)
@@ -1285,8 +1304,13 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     for s in sell_list:
         if s["flagged"] and s["id"] in squad:
             actions.append(f"Check news on {s['name']} before the deadline: {s['reasons'][0].rstrip('. ')}.")
+    for i in squad:
+        b = brief_players.get(i)
+        if b and b.get("start_chance") is not None and _f(b["start_chance"]) <= 60:
+            actions.append(f"Team news: {elements[i]['web_name']}: {str(b.get('verdict', '')).rstrip('.')} "
+                           f"(start chance {int(_f(b['start_chance']))}%, {b.get('confidence', 'medium')} confidence).")
     for i in lineup["xi"]:
-        if i in competition:
+        if i in competition and i not in brief_players:
             c = competition[i]
             actions.append(f"Check news on {elements[i]['web_name']} before the deadline: {c['returner_name']} is fit again and could take their place. "
                            f"Watch the press conference and predicted line-ups.")
@@ -1366,6 +1390,15 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         "players": players_tbl,
         "history": {"gws": hist_out, "totals": hist_tot},
         "price_watch": price_watch,
+        "briefing": ({
+            "generated_at": brief.get("generated_at"), "news_collected_at": brief.get("news_collected_at"),
+            "summary": brief.get("summary", ""),
+            "players": sorted([{**b, "id": pid_b, "team": teams[elements[pid_b]["team"]]["short_name"],
+                                "pos": POS[pos[pid_b]], "mine": pid_b in squad,
+                                "xpts_next": _r(xpts[pid_b][0]) if xpts[pid_b] else None}
+                               for pid_b, b in brief_players.items()],
+                              key=lambda x: (not x["mine"], _f(x.get("start_chance"), 100))),
+        } if brief else {"stale": bool(briefing), "gameweek": (briefing or {}).get("gameweek")}),
         "competition": sorted([{"id": i, "name": elements[i]["web_name"], "team": teams[elements[i]["team"]]["short_name"],
                                 "pos": POS[pos[i]], "returner": c["returner_name"], "returner_price": c["returner_price"],
                                 "mine": i in squad, "selected": _f(elements[i].get("selected_by_percent"))}

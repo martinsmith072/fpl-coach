@@ -142,6 +142,15 @@ def recent_form(bootstrap: Dict[str, Any], squad: List[int], per_pos: int = 45, 
         return {pid: r for pid, r in pool.map(one, sorted(ids)) if r}
 
 
+def load_briefing() -> Optional[Dict[str, Any]]:
+    """The team-news briefing Claude writes from the collected news (team_news.json), if any."""
+    try:
+        with open(os.path.join(ROOT, "team_news.json"), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
 def load_team(team_id: int) -> Dict[str, Any]:
     bootstrap = fpl_get("/bootstrap-static/", ttl=300)
     fixtures = fpl_get("/fixtures/", ttl=300)
@@ -162,7 +171,7 @@ def load_team(team_id: int) -> Dict[str, Any]:
     # Per-player match history from FPL is only needed when the match dataset is unavailable.
     recent = {} if core else recent_form(bootstrap, squad)
     advice = build_advice(bootstrap, fixtures, entry, history, picks, transfers=transfers, notes=notes,
-                          recent=recent, core=core)
+                          recent=recent, core=core, briefing=load_briefing())
     return advice
 
 

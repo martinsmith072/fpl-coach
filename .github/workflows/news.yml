@@ -1,0 +1,58 @@
+name: Collect team news
+
+# Gathers recent headlines for our players and clubs into news/latest.json on the
+# "news-data" branch, for Claude to read and turn into team_news.json (the briefing).
+# Runs daily, but only collects when the next FPL deadline is within 36 hours.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Collect even if the deadline is more than 36 hours away"
+        type: boolean
+        default: true
+  schedule:
+    - cron: "15 13 * * *"   # 13:15 UTC daily (13:15 UK winter / 14:15 UK summer), before the 15:00 briefing
+    - cron: "45 5 * * 6"    # Saturday 05:45 UTC, before the Saturday 07:30 briefing
+
+permissions:
+  contents: write
+
+concurrency:
+  group: news
+  cancel-in-progress: true
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Collect headlines
+        run: |
+          FORCE=""
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then FORCE="--force"; fi
+          python3 collect_news.py --out "$RUNNER_TEMP/news.json" $FORCE
+      - name: Save to the news-data branch
+        run: |
+          if [ ! -f "$RUNNER_TEMP/news.json" ]; then echo "Nothing collected."; exit 0; fi
+          git config user.name "FPL Coach news bot"
+          git config user.email "noreply@github.com"
+          if git ls-remote --exit-code --heads origin news-data >/dev/null 2>&1; then
+            git fetch --depth=1 origin news-data
+            git switch -c news-data --track origin/news-data
+          else
+            git switch --orphan news-data
+            git rm -rf --quiet . || true
+          fi
+          mkdir -p news
+          cp "$RUNNER_TEMP/news.json" news/latest.json
+          GW=$(python3 -c "import json;print(json.load(open('news/latest.json'))['gameweek'])")
+          cp news/latest.json "news/GW${GW}-$(date -u +%Y%m%dT%H%M).json"
+          ls -1t news/GW*.json | tail -n +21 | xargs -r rm -f   # keep the 20 most recent snapshots
+          git add -A news
+          git commit -q -m "News for GW${GW} ($(date -u +%Y-%m-%dT%H:%MZ))" || { echo "No changes."; exit 0; }
+          git push -q origin news-data
+          echo "Saved news/latest.json for GW${GW}."
