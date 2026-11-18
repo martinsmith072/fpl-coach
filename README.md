@@ -7,7 +7,7 @@ A personal Fantasy Premier League assistant that runs on your own computer. It r
 This repo builds and publishes the dashboard with GitHub Actions and GitHub Pages.
 
 1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
-2. *(Optional)* **Settings → Secrets and variables → Actions → Variables:** add `FPL_TEAM_ID` with your team ID. It defaults to 633619.
+2. List the team IDs to follow in **`teams.json`**, e.g. `[633619, 258412]`. In the dashboard, **⚙ Settings → Edit teams on GitHub** opens this file. Switch between teams with the toggle at the top.
 3. **Actions → Update FPL Coach → Run workflow.** When it finishes, your dashboard is at `https://<your-username>.github.io/<repo-name>/`.
 
 It refreshes automatically every morning, on Friday evening after the press conferences, and on Saturday morning. To refresh now, use the **Refresh signals + advice** button on the Signals tab, which opens the *Run workflow* page.

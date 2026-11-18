@@ -154,8 +154,14 @@ svg text{fill:var(--muted);font-size:11px}
 tr.rec td{background:color-mix(in srgb,var(--accent) 12%,transparent)}
 tr.rec td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 @media (max-width:560px){.chiptop{flex-direction:column;align-items:stretch}}
+.switch{display:inline-flex;gap:4px;padding:3px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);max-width:100%;overflow-x:auto}
+.switch:empty{display:none}
+.switch button{background:transparent;color:var(--muted);padding:6px 12px;border-radius:9px;font-weight:700;white-space:nowrap}
+.switch button:hover{box-shadow:none;color:var(--ink)}
+.switch button.on{background:var(--accent);color:var(--accent-ink)}
+code{background:var(--panel2);padding:1px 5px;border-radius:5px;font-size:12.5px}
 .hide{display:none!important}
-@media (max-width:560px){.pc{width:74px;padding:6px 3px}.pc .n{font-size:11px}.pc .o{font-size:10px}.stat .v{font-size:22px}header{padding:12px 16px}nav{padding:8px 12px}.card{padding:14px}}
+@media (max-width:560px){.stat .spark{display:none}.pc{width:74px;padding:6px 3px}.pc .n{font-size:11px}.pc .o{font-size:10px}.stat .v{font-size:22px}header{padding:12px 16px}nav{padding:8px 12px}.card{padding:14px}}
 </style>
 </head>
 <body>
@@ -164,6 +170,8 @@ tr.rec td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
   <form id="f">
     <input id="tid" inputmode="numeric" placeholder="FPL team ID" aria-label="FPL team ID" size="12">
     <button id="go">Analyse</button>
+    <span id="switch" class="switch"></span>
+    <button type="button" class="ghost" id="settingsBtn" title="Teams and settings">⚙ Settings</button>
     <button type="button" class="ghost" id="theme" title="Toggle light/dark">Theme</button>
   </form>
 </header>
@@ -175,7 +183,7 @@ tr.rec td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 
 <script>
 const TABS=[["overview","This week"],["team","My team"],["transfers","Transfers"],["whatif","What if"],["signals","Signals"],["chips","Chips"],["fixtures","Fixtures"],["players","Players"],["history","History"]];
-let STATIC=null,D=null,S=null,tab="overview",sortKey="xpts_h",sortDir=-1,posFilter="ALL",maxPrice="",search="";
+let TEAMS=[],REPO="",CUR=null,STATIC=null,D=null,S=null,tab="overview",sortKey="xpts_h",sortDir=-1,posFilter="ALL",maxPrice="",search="";
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
@@ -189,6 +197,8 @@ $("#theme").onclick=()=>{const cur=document.documentElement.dataset.theme||(matc
 function navs(){ $("#tabs").innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?"on":""}" data-t="${k}">${l}</button>`).join("");
   $("#tabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;store.set("tab",tab);navs();render()}); }
 
+function rememberTeam(){let ids=[];try{ids=JSON.parse(store.get("recent")||"[]")}catch(e){}
+  ids=[{id:D.manager.id,name:D.manager.team_name,manager:D.manager.manager,rank:D.manager.overall_rank},...ids.filter(x=>x.id!==D.manager.id)].slice(0,5);store.set("recent",JSON.stringify(ids))}
 async function load(refresh){
   const id=$("#tid").value.trim();
   if(!/^\d+$/.test(id)){$("#app").innerHTML=`<div class="err">Team ID should be a number, like 1234567.</div>`;return}
@@ -197,7 +207,7 @@ async function load(refresh){
   try{
     const r=await fetch(`/api/team/${id}${refresh?"?refresh=1":""}`);const j=await r.json();
     if(!r.ok||j.error)throw new Error(j.error||r.statusText);
-    D=j;S=null;pAll.m=null;W=null;navs();render();
+    D=j;S=null;pAll.m=null;W=null;CUR=D.manager.id;rememberTeam();recentIds();navs();render();
   }catch(e){$("#app").innerHTML=`<div class="err">${esc(e.message)}</div>`}
   finally{$("#go").disabled=false}
 }
@@ -502,22 +512,69 @@ function workflowUrl(){
   const m=location.hostname.match(/^([^.]+)\.github\.io$/);const repo=location.pathname.split("/").filter(Boolean)[0];
   return m&&repo?`https://github.com/${m[1]}/${repo}/actions/workflows/update.yml`:"https://github.com";
 }
+async function getJSON(u){const r=await fetch(u,{cache:"no-store"});if(!r.ok)throw new Error(r.status);return r.json()}
+async function showTeam(id){
+  CUR=+id;store.set("team",String(CUR));
+  const base=`data/teams/${CUR}/`;
+  $("#app").innerHTML=`<div class="empty">Loading…</div>`;
+  try{D=await getJSON(base+"team.json")}catch(e){D=await getJSON("data/team.json")}
+  S=await getJSON(base+"signals.json").catch(()=>getJSON("data/signals.json").catch(()=>null));
+  pAll.m=null;W=null;switcher();navs();render();
+}
+function switcher(){
+  const el=$("#switch");const ok=TEAMS.filter(t=>!t.error);
+  if(ok.length<2){el.innerHTML="";return}
+  el.innerHTML=ok.map(t=>`<button type="button" class="${t.id===CUR?"on":""}" data-team="${t.id}" title="${esc(t.manager||"")}">${esc(t.team_name||t.id)}</button>`).join("");
+  el.querySelectorAll("[data-team]").forEach(b=>b.onclick=()=>showTeam(b.dataset.team));
+}
+function settings(){
+  const ok=TEAMS.length?TEAMS:(D?[{id:D.manager.id,team_name:D.manager.team_name,manager:D.manager.manager,overall_rank:D.manager.overall_rank}]:[]);
+  const repo=REPO||(()=>{const m=location.hostname.match(/^([^.]+)\.github\.io$/);const r=location.pathname.split("/").filter(Boolean)[0];return m&&r?`${m[1]}/${r}`:""})();
+  const edit=repo?`https://github.com/${repo}/edit/main/teams.json`:"";
+  const list=ok.map(t=>`<tr><td><b>${esc(t.team_name||"–")}</b><div class="small muted">${esc(t.manager||"")}</div></td><td class="num">${t.id}</td><td class="num">${t.error?'<span class="pill bad">couldn\'t load</span>':big(t.overall_rank)}</td><td>${!t.error&&STATIC?`<button class="ghost" data-team="${t.id}">View</button>`:""}</td></tr>`).join("");
+  $("#app").innerHTML=`<div class="grid g2"><div class="card"><h2>Teams</h2>
+   <div class="scroll"><table><tr><th>Team</th><th class="num">ID</th><th class="num">Rank</th><th></th></tr>${list}</table></div>
+   ${STATIC?`<h3>Add or remove a team</h3>
+   <ol class="small" style="padding-left:18px;margin:6px 0 12px">
+    <li>Find the team ID: it's the number in the FPL address <span class="muted">fantasy.premierleague.com/entry/<b>258412</b>/event/10</span>.</li>
+    <li>Press the button below. GitHub opens a small file listing the IDs.</li>
+    <li>Add or remove numbers, keeping the commas, e.g. <code>[633619, 258412, 123456]</code>.</li>
+    <li>Press <b>Commit changes</b>. The site rebuilds with the new teams in about 2 minutes.</li></ol>
+   ${edit?`<a href="${esc(edit)}" target="_blank" rel="noopener"><button type="button">Edit teams on GitHub</button></a>`:""}`
+   :`<p class="small">Running locally: type any team ID at the top and press Analyse. Recent IDs appear as buttons.</p>`}
+   </div>
+   <div class="card"><h2>Appearance</h2><p class="small">Switch between the dark "floodlights" and light "matchday" themes.</p><button class="ghost" id="theme2">Toggle theme</button>
+   <h3>Updates</h3><p class="small">${STATIC?`Updated ${STATIC.built?new Date(STATIC.built).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"}):"–"}. Runs automatically every morning, Friday evening and Saturday morning.${repo?` <a href="https://github.com/${esc(repo)}/actions/workflows/update.yml" target="_blank" rel="noopener">Update now</a>.`:""}`:"Data is fetched live when you press Analyse."}</p></div></div>`;
+  document.querySelectorAll("#app [data-team]").forEach(b=>b.onclick=()=>{tab="overview";store.set("tab",tab);showTeam(b.dataset.team)});
+  const t2=$("#theme2");if(t2)t2.onclick=()=>$("#theme").click();
+  $("#tabs").querySelectorAll("button").forEach(b=>b.classList.remove("on"));
+}
+$("#settingsBtn").onclick=()=>settings();
 async function boot(){
   tab=store.get("tab")||"overview";
   // Hosted mode: the data was built by GitHub Actions and published next to this page.
-  try{
-    const r=await fetch("data/team.json",{cache:"no-store"});
-    if(r.ok){
-      D=await r.json();
-      const [s,b]=await Promise.all([fetch("data/signals.json",{cache:"no-store"}).then(x=>x.ok?x.json():null).catch(()=>null),
-                                     fetch("data/build.json",{cache:"no-store"}).then(x=>x.ok?x.json():{}).catch(()=>({}))]);
-      S=s;STATIC=b||{};
-      $("#tid").classList.add("hide");$("#go").classList.add("hide");
-      navs();render();return;
-    }
-  }catch(e){}
+  let idx=null;
+  try{idx=await getJSON("data/teams.json")}catch(e){}
+  if(idx||await fetch("data/team.json",{method:"HEAD",cache:"no-store"}).then(r=>r.ok).catch(()=>false)){
+    TEAMS=(idx&&idx.teams)||[];REPO=(idx&&idx.repo)||"";
+    STATIC=await getJSON("data/build.json").catch(()=>({}));
+    $("#tid").classList.add("hide");$("#go").classList.add("hide");
+    const want=+(new URLSearchParams(location.search).get("team")||store.get("team")||0);
+    const ok=TEAMS.filter(t=>!t.error);
+    const pick=ok.find(t=>t.id===want)||ok[0];
+    await showTeam(pick?pick.id:0);
+    return;
+  }
   const saved=store.get("tid");
+  recentIds();
   if(saved){$("#tid").value=saved;load(false)}
+}
+function recentIds(){
+  let ids=[];try{ids=JSON.parse(store.get("recent")||"[]")}catch(e){}
+  TEAMS=ids.map(x=>({id:x.id,team_name:x.name,manager:x.manager,overall_rank:x.rank}));
+  const el=$("#switch");if(STATIC||ids.length<2){el.innerHTML="";return}
+  el.innerHTML=ids.map(x=>`<button type="button" class="${x.id===CUR?"on":""}" data-rid="${x.id}">${esc(x.name)}</button>`).join("");
+  el.querySelectorAll("[data-rid]").forEach(b=>b.onclick=()=>{$("#tid").value=b.dataset.rid;load(false)});
 }
 boot();
 </script>

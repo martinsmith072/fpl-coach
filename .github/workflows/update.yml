@@ -22,7 +22,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      FPL_TEAM_ID: ${{ vars.FPL_TEAM_ID || '633619' }}
+      FPL_TEAM_IDS: ${{ vars.FPL_TEAM_IDS }}   # optional override; normally the list in teams.json is used
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
