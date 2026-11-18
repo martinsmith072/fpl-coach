@@ -777,14 +777,41 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     budget_total = squad_sell_value + bank
     wc_cache: Dict[str, Any] = {}
 
-    def wildcard_eval() -> Dict[str, Any]:
-        if "wc" not in wc_cache:
-            n = min(TRANSFER_HORIZON, len(horizon))
-            score = {i: sum(WEIGHTS[k] * xpts[i][k] for k in range(n)) for i in elements}
-            sq, _ = build_squad(elements, pos, pools, score, budget_total)
-            gain = squad_value(sq, pos, xpts, n) - squad_value(squad, pos, xpts, n)
-            wc_cache["wc"] = {"squad": sq, "gain": gain}
-        return wc_cache["wc"]
+    def wildcard_timing(stop: int) -> List[Tuple[int, float, str, List[int]]]:
+        """Gain from a Wildcard played in each week of its window, versus your squad after this week's planned transfers."""
+        last_w = min(stop, next_gw + 8)
+        long_h = list(range(next_gw, min(last_gw, last_w + TRANSFER_HORIZON - 1) + 1))
+        lp = Projector(bootstrap, fx, long_h, recent).xpts
+        mv = plan["best"]["moves"]
+        after = list(squad)
+        if mv:
+            after = [mv["in"][mv["outs"].index(i)] if i in mv["outs"] else i for i in squad]
+
+        def val(sq: List[int], s0: int, n: int) -> float:
+            t = 0.0
+            for k in range(n):
+                r = best_xi(sq, pos, {i: lp[i][s0 + k] for i in sq})
+                t += WEIGHTS[k] * (r["with_captain"] + 0.1 * r["bench_total"])
+            return t
+
+        out = []
+        for w in range(next_gw, last_w + 1):
+            s0 = w - next_gw
+            n = min(TRANSFER_HORIZON, len(long_h) - s0)
+            if n < 3:
+                break
+            score = {i: sum(WEIGHTS[k] * lp[i][s0 + k] for k in range(n)) for i in elements}
+            wc_pools = {pp: list(dict.fromkeys(sorted([i for i in playable if pos[i] == pp], key=lambda i: score[i], reverse=True)[:40]
+                                               + [i for i in pools[pp] if elements[i]["now_cost"] <= 50][:6])) for pp in (1, 2, 3, 4)}
+            sq, _ = build_squad(elements, pos, wc_pools, score, budget_total)
+            base_sq = squad if w == next_gw else after
+            gain = val(sq, s0, n) - val(base_sq, s0, n)
+            if w == next_gw:  # this week you could make the planned transfers instead
+                gain -= max(0.0, plan["best"]["gain"] - plan["best"]["hits"])
+            fdrs = [g["fdr"] for i in after for k in range(n) for g in fx.get(elements[i]["team"], w + k) if g.get("fdr")]
+            note = f"your fixtures avg {sum(fdrs) / len(fdrs):.2f}" if fdrs else ""
+            out.append((w, gain, note, sq))
+        return out
 
     def freehit_eval(k: int) -> Dict[str, Any]:
         key = f"fh{k}"
@@ -847,13 +874,15 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                      f"{x['playing']}/15 have a fixture" + (f", {x['doubles']} doubles" if x["doubles"] else "")) for x, g in raw]
             threshold = 10.0
         else:  # wildcard
-            wc = wildcard_eval()
-            # Compare with what your free transfers could achieve anyway, not with doing nothing.
-            ft_gain = max(0.0, plan["best"]["gain"] - plan["best"]["hits"])
-            vals = [(next_gw, wc["gain"] - ft_gain,
-                     f"rebuild +{wc['gain']:.0f} vs +{ft_gain:.0f} from your free transfers")] if start <= next_gw <= stop else []
+            timing = wildcard_timing(stop) if start <= next_gw <= stop else []
+            vals = [(w, g, n) for w, g, n, _ in timing]
             threshold = 20.0
-            row["draft"] = [player_view(i) for i in sorted(wc["squad"], key=lambda i: (pos[i], -hsum5[i]))]
+            if timing:
+                row["draft"] = [player_view(i) for i in sorted(timing[0][3], key=lambda i: (pos[i], -hsum5[i]))]
+            row["explain"] = ("A Wildcard gives unlimited free transfers for one gameweek, and the new squad is permanent. "
+                              "Unlike Free Hit, your squad doesn't revert. Each week shows how much better a rebuild would do "
+                              f"over the {TRANSFER_HORIZON} GWs from that week than your squad would (this week: after your planned "
+                              "free transfers). The model is optimistic about its own picks, so treat the gain as an upper bound.")
         row["values"] = [{"gw": g, "value": _r(v, 1), "note": n} for g, v, n in vals]
         weeks_left = stop - next_gw + 1
         if not vals:
@@ -865,8 +894,20 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             row["best_value"] = _r(best_val, 1)
             if name == "wildcard":
                 problems = sum(1 for s in sell_list if s["severity"] >= 3)
-                if best_val >= threshold or problems >= 4:
-                    verdict = f"Worth considering now: a rebuild projects +{best_val:.1f} pts more than using your free transfers, over {min(TRANSFER_HORIZON, len(horizon))} GWs"
+                per_week = max(now_val, 0.0) / TRANSFER_HORIZON
+                # Waiting costs roughly one week of improvement per week of delay.
+                eff = [(g, v - (g - next_gw) * per_week) for g, v, _ in vals]
+                best_eff_gw, best_eff = max(eff, key=lambda e: e[1])
+                later_best = max(((g, v) for g, v, _ in vals if g > next_gw), key=lambda e: e[1], default=(None, 0.0))
+                if best_eff_gw != next_gw and best_val >= threshold:
+                    verdict = (f"Wait for GW{best_eff_gw}: your fixtures turn and a rebuild then projects +{dict((g, v) for g, v, _ in vals)[best_eff_gw]:.1f} "
+                               f"(vs +{now_val:.1f} now)")
+                    status = "plan"
+                elif now_val >= threshold or problems >= 4:
+                    swing = ("No fixture swing worth waiting for" if later_best[0] is None or later_best[1] - now_val < 5
+                             else f"GW{later_best[0]} is slightly better (+{later_best[1]:.1f}) but not enough to justify waiting")
+                    verdict = (f"Worth considering now: a rebuild projects +{now_val:.1f} pts more than your free transfers over {TRANSFER_HORIZON} GWs. "
+                               f"{swing}. Each week you wait costs about {per_week:.0f} pts")
                     status = "play"
                 elif weeks_left <= 3:
                     verdict = f"Use it or lose it: the window closes after GW{stop}. Gain now: +{best_val:.1f}"

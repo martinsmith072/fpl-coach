@@ -287,12 +287,12 @@ function chips(){
     const vals=c.values.length?`<table><tr><th>GW</th><th style="width:50%">Value</th><th class="num">Pts</th><th>Note</th></tr>${c.values.map(v=>`<tr><td>GW${v.gw}</td><td><div class="bar"><i style="width:${Math.max(0,v.value)/max*100}%"></i></div></td><td class="num">${fmt(v.value)}</td><td class="small muted">${esc(v.note)}</td></tr>`).join("")}</table>`:"";
     const draft=c.draft?`<h3>Suggested ${esc(c.label)} squad</h3><div class="small">${c.draft.map(p=>`${p.pos} <b>${esc(p.name)}</b> (${esc(p.team)}, £${fmt(p.price)})`).join(" · ")}</div>`:"";
     const also=(c.also||[]).map(a=>`<div class="small muted">GW${a.window[0]}–${a.window[1]}: ${esc(a.verdict)}</div>`).join("");
-    return `<div class="card"><h2>${esc(c.label)} <span class="pill ${c.status}">${esc(c.status)}</span> <span class="small muted">GW${c.window[0]}–${c.window[1]}</span></h2><p>${esc(c.verdict)}</p>${vals}${draft}${also}</div>`}).join("");
+    return `<div class="card"><h2>${esc(c.label)} <span class="pill ${c.status}">${esc(c.status)}</span> <span class="small muted">GW${c.window[0]}–${c.window[1]}</span></h2><p>${esc(c.verdict)}</p>${c.explain?`<p class="small muted">${esc(c.explain)}</p>`:""}${vals}${draft}${also}</div>`}).join("");
   return head()+`<div class="card" style="margin-bottom:14px"><h2>How chips are judged</h2><div class="small">
   <b>Bench Boost</b>: your bench's expected points; best in a double gameweek when all 15 have games.
   <b>Triple Captain</b>: your captain's expected points; look for a premium with two good fixtures.
   <b>Free Hit</b>: how much better a one-week dream team would do than your squad, compared with a normal week; ideal for blank weeks.
-  <b>Wildcard</b>: how much a full rebuild gains over the next ${D.meta.transfer_horizon} weeks.
+  <b>Wildcard</b>: a permanent rebuild (unlimited free transfers for one week). It's valued over the ${D.meta.transfer_horizon} weeks after you play it, for each week you could play it, so you can see whether fixtures make waiting worthwhile.
   Chips must be used within their window, so the app warns you when a window is closing.</div></div><div class="grid g2">${rows}</div>`;
 }
 
