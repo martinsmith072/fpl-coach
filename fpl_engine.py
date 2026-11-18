@@ -338,8 +338,10 @@ def fixture_points(r: PlayerRates, rules: Dict[str, Any], att_mult: float, lam_a
 
 class Projector:
     def __init__(self, bootstrap: Dict[str, Any], fx: FixtureIndex, horizon: List[int],
-                 recent: Optional[Dict[int, Dict[str, Any]]] = None, core: Optional[Dict[str, Any]] = None):
+                 recent: Optional[Dict[int, Dict[str, Any]]] = None, core: Optional[Dict[str, Any]] = None,
+                 competition: Optional[Dict[int, Dict[str, Any]]] = None):
         self.fx = fx
+        self.competition = competition or {}
         self.recent = recent or {}
         self.total_players = max(_f(bootstrap.get("total_players"), 10_000_000), 1.0)
         self.core = core
@@ -361,6 +363,10 @@ class Projector:
         if rec and rec.get("games", 0) >= 3:
             r.start_rate = 0.5 * r.start_rate + 0.5 * rec["start_rate"]
             r.sub_rate = min(1 - r.start_rate, 0.3) if _f(p.get("minutes")) > 0 else 0.0
+        comp = self.competition.get(p["id"])
+        if comp:  # an established player in their position is fit again
+            r.start_rate *= comp["mult"]
+            r.sub_rate = min(1 - r.start_rate, 0.3)
         self.rates[p["id"]] = r
         lam_avg = self.tm.mu * self.tm.d_avg(team)
         out: List[float] = []
@@ -388,6 +394,48 @@ class Projector:
             calib = 1 + w * (scale - 1)
             out = [x * calib for x in out]
         return out
+
+
+# --------------------------------------------------------------------------- competition for places
+
+REGULAR_PRICE = {1: 5.0, 2: 5.0, 3: 6.0, 4: 6.5}  # a player this pricey is normally a first-choice starter
+DISPLACED_START_MULT = 0.65  # chance of starting kept by a stand-in when the regular is back
+
+
+def competition_for_places(elements: Dict[int, Dict[str, Any]], core: Optional[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+    """Find stand-ins at risk because an established player in their position is fit again.
+
+    A "returner" is available now (or 75%+), priced like a regular starter, and hasn't played in the
+    team's last 3 league matches. The cheapest player who has been starting in that position is the
+    likeliest to drop out, so their chance of starting is reduced.
+    """
+    if not core or not core.get("player_matches"):
+        return {}
+    by_team_pos: Dict[Tuple[int, int], List[Dict[str, Any]]] = defaultdict(list)
+    for p in elements.values():
+        by_team_pos[(p["team"], p["element_type"])].append(p)
+    out: Dict[int, Dict[str, Any]] = {}
+    for (team, pos_id), players in by_team_pos.items():
+        starters = []
+        for p in players:
+            rs = core_insights.recent_summary(core, p["id"], 3)
+            if rs and rs["starts"] >= 2:
+                starters.append(p)
+        for r in players:
+            status = r.get("status") or "a"
+            fit = status == "a" or _f(r.get("chance_of_playing_next_round"), 0) >= 75
+            price = _f(r.get("now_cost")) / 10.0
+            rs = core_insights.recent_summary(core, r["id"], 3)
+            recent_mins = rs["mins_total"] if rs else 0.0
+            if not fit or price < REGULAR_PRICE[pos_id] or recent_mins > 0 or r in starters:
+                continue
+            cands = [s_ for s_ in starters if s_["id"] not in out and _f(s_.get("now_cost")) / 10.0 <= price - 0.5]
+            if not cands:
+                continue
+            victim = min(cands, key=lambda s_: (_f(s_.get("now_cost")), _f(s_.get("total_points"))))
+            out[victim["id"]] = {"returner": r["id"], "returner_name": r.get("web_name"), "returner_price": price,
+                                 "mult": DISPLACED_START_MULT}
+    return out
 
 
 # --------------------------------------------------------------------------- lineup optimisation
@@ -722,7 +770,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             return f"{rs['starts']}/{rs['games']}"
         return f"{recent[pid]['starts']}/{recent[pid]['games']}" if pid in recent else None
 
-    proj = Projector(bootstrap, fx, horizon, recent, core)
+    competition = competition_for_places(elements, core)
+    proj = Projector(bootstrap, fx, horizon, recent, core, competition)
     xpts = proj.xpts
     total_players = int(_f(bootstrap.get("total_players"), 10_000_000))
 
@@ -790,6 +839,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             "cost_change_event": _price(p.get("cost_change_event")),
             "recent_starts": recent_starts(pid),
             "recent": recent_view(pid),
+            "competition": (f"{competition[pid]['returner_name']} (£{competition[pid]['returner_price']:.1f}m) is fit again"
+                            if pid in competition else None),
             "momentum": net,
         }
 
@@ -844,7 +895,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                 "fixtures": cells, "avg_fdr": _r(sum(fd) / len(fd), 2) if fd else None, "form": _f(p.get("form")),
                 "status": p.get("status") or "a", "chance": p.get("chance_of_playing_next_round"), "news": p.get("news") or "",
                 "selected": _f(p.get("selected_by_percent")),
-                "recent_starts": recent_starts(i), "recent": recent_view(i)}
+                "recent_starts": recent_starts(i), "recent": recent_view(i),
+                "competition": (f"{competition[i]['returner_name']} is fit again" if i in competition else None)}
 
     def move_view(m: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -885,6 +937,10 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         if blanks:
             reasons.append(f"Blank in {blanks} of the next 4 GWs")
             severity += blanks
+        if i in competition:
+            c = competition[i]
+            reasons.append(f"Place under threat: {c['returner_name']} (£{c['returner_price']:.1f}m) is fit again and may come straight back in")
+            severity += 1.5
         rec = recent.get(i)
         if rec and rec.get("games", 0) >= 3 and rec["starts"] <= rec["games"] - 2 and st == "a":
             reasons.append(f"Rotation risk: started {rec['starts']} of the last {rec['games']}")
@@ -929,7 +985,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     # Chips are judged over their whole window (up to 9 weeks ahead), so project further than usual.
     CHIP_LOOK = 9
     chip_h = list(range(next_gw, min(last_gw, next_gw + CHIP_LOOK - 1 + TRANSFER_HORIZON - 1) + 1))
-    lp = Projector(bootstrap, fx, chip_h, recent, core).xpts
+    lp = Projector(bootstrap, fx, chip_h, recent, core, competition).xpts
     chip_weeks = chip_h[:CHIP_LOOK]
     mv_best = plan["best"]["moves"]
     after = list(squad)
@@ -1229,6 +1285,11 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     for s in sell_list:
         if s["flagged"] and s["id"] in squad:
             actions.append(f"Check news on {s['name']} before the deadline: {s['reasons'][0].rstrip('. ')}.")
+    for i in lineup["xi"]:
+        if i in competition:
+            c = competition[i]
+            actions.append(f"Check news on {elements[i]['web_name']} before the deadline: {c['returner_name']} is fit again and could take their place. "
+                           f"Watch the press conference and predicted line-ups.")
     for pv in price_watch:
         if pv["price_trend"] == "falling" and any(m == pv["id"] for m in (best["moves"] or {}).get("outs", [])):
             actions.append(f"Sell {pv['name']} early. Their price looks likely to drop.")
@@ -1305,4 +1366,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         "players": players_tbl,
         "history": {"gws": hist_out, "totals": hist_tot},
         "price_watch": price_watch,
+        "competition": sorted([{"id": i, "name": elements[i]["web_name"], "team": teams[elements[i]["team"]]["short_name"],
+                                "pos": POS[pos[i]], "returner": c["returner_name"], "returner_price": c["returner_price"],
+                                "mine": i in squad, "selected": _f(elements[i].get("selected_by_percent"))}
+                               for i, c in competition.items()], key=lambda x: (not x["mine"], -x["selected"])),
     }

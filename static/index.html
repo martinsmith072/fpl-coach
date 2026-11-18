@@ -301,7 +301,7 @@ function mvRow(o,side,gws){
   const cells=gws.map((g,k)=>{const c=(o.fixtures||[])[k]||[];const x=(o.xpts||[])[k];
     return `<td class="mvc">${c.length?c.map(f=>`<span class="fdr fdr${f.fdr||3}">${esc(f.opp)}${f.home?"":" (a)"}</span>`).join(""):`<span class="fdr blank">–</span>`}<div class="mvx">${x==null?"–":fmt(x)}</div></td>`}).join("");
   const st=o.status&&o.status!=="a"?` <span class="pill ${o.chance!=null&&o.chance>25?"warn":"bad"}" title="${esc(o.news)}">${o.chance??0}%</span>`:"";
-  return `<tr class="${side}"><td class="mvn"><span class="${side}">${side==="out"?"−":"+"} ${esc(o.name)}</span>${st}<div class="small muted">${esc(o.team)} · ${o.pos||""} · £${fmt(o.price)} · form ${fmt(o.form)}${o.recent_starts?` · started ${o.recent_starts}`:""}</div>${o.recent?`<div class="small muted">Last ${o.recent.games}: xG ${fmt(o.recent.xg)} · xA ${fmt(o.recent.xa)} · ${o.recent.shots} shots</div>`:""}</td>${cells}
+  return `<tr class="${side}"><td class="mvn"><span class="${side}">${side==="out"?"−":"+"} ${esc(o.name)}</span>${st}<div class="small muted">${esc(o.team)} · ${o.pos||""} · £${fmt(o.price)} · form ${fmt(o.form)}${o.recent_starts?` · started ${o.recent_starts}`:""}</div>${o.recent?`<div class="small muted">Last ${o.recent.games}: xG ${fmt(o.recent.xg)} · xA ${fmt(o.recent.xa)} · ${o.recent.shots} shots</div>`:""}${o.competition?`<div class="small" style="color:var(--warn)">⚠ ${esc(o.competition)}: place at risk</div>`:""}</td>${cells}
    <td class="num"><b>${fmt(o.xpts_h)}</b><div class="small muted">diff ${o.avg_fdr==null?"–":fmt(o.avg_fdr,1)}</div></td></tr>`}
 function mv(m){
   const gws=m.gws||[];const has=gws.length&&(m.out[0]||{}).xpts;
@@ -475,6 +475,19 @@ function history(){
   ${[...g].reverse().map(x=>`<tr><td>${x.gw}</td><td class="num"><b>${x.points}</b></td><td class="num">${x.avg??"–"}</td><td class="num">${x.bench}</td><td class="num">${x.transfers}</td><td class="num">${x.hits?"−"+x.hits:""}</td><td>${x.chip?`<span class="pill">${esc(x.chip)}</span>`:""}</td><td class="num">${big(x.overall_rank)}</td></tr>`).join("")}</table></div></div>`;
 }
 
+function compCard(){
+  const C=D.competition||[];
+  const rows=C.length?`<div class="scroll"><table><tr><th>Player at risk</th><th>Who's back</th></tr>${C.map(c=>`<tr><td class="${c.mine?"mine":""}">${esc(c.name)} <span class="muted small">${esc(c.team)} · ${c.pos}</span>${c.mine?'<span class="tag">yours</span>':""}</td><td>${esc(c.returner)} <span class="muted small">£${fmt(c.returner_price)}m · fit, yet to return</span></td></tr>`).join("")}</table></div>`
+    :`<p class="small muted">No established players returning to threaten a regular starter right now.</p>`;
+  return `<div class="grid g2" style="margin-bottom:14px"><div class="card"><h2>Competition for places</h2>${rows}
+   <div class="note">When an established player is fit again after missing matches, the cheapest player who's been starting in that position is the likeliest to drop out. Their chance of starting is cut to about two-thirds until they've proved otherwise.</div></div>
+   <div class="card"><h2>Press conferences & predicted line-ups</h2><p class="small">Managers speak on Thursday and Friday. These free pages summarise what they said and predict every team's line-up:</p>
+   <div style="display:flex;flex-direction:column;gap:8px">
+    <a href="https://www.fantasyfootballscout.co.uk/team-news" target="_blank" rel="noopener"><button type="button" class="ghost" style="width:100%;text-align:left">Fantasy Football Scout · team news & predicted line-ups ↗</button></a>
+    <a href="https://allaboutfpl.com/" target="_blank" rel="noopener"><button type="button" class="ghost" style="width:100%;text-align:left">AllAboutFPL · predicted line-ups ↗</button></a>
+    <a href="https://www.bbc.co.uk/sport/football/premier-league" target="_blank" rel="noopener"><button type="button" class="ghost" style="width:100%;text-align:left">BBC Sport · Premier League team news ↗</button></a></div>
+   <div class="note">Check anyone flagged under "Your squad" or "Competition for places", then use the What if tab to test a change.</div></div></div>`;
+}
 function signals(){
   const last=store.get("sig_at_"+D.manager.id);
   let body;
@@ -493,6 +506,7 @@ function signals(){
     body=`<div class="grid g2" style="margin-bottom:14px">
     <div class="card"><h2>Most bought this GW</h2><div class="scroll"><table>${momHead.replace("%K%","In")}${mom("in")}</table></div></div>
     <div class="card"><h2>Most sold this GW</h2><div class="scroll"><table>${momHead.replace("%K%","Out")}${mom("out")}</table></div></div></div>
+    ${compCard()}
     <div class="note" style="margin:-6px 0 14px">Transfer momentum and recent minutes feed into the projections: heavily bought players get a small boost (up to +4%) and heavily sold ones a small cut. Players who've been dropped or rotated recently are projected fewer minutes.</div>
     <div class="grid g2">
     <div class="card"><h2>What's changed${S.previous?` since ${new Date(S.previous).toLocaleString("en-GB",{weekday:"short",hour:"2-digit",minute:"2-digit"})}`:""}</h2>${ch}</div>
