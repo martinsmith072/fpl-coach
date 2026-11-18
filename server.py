@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional, Tuple
@@ -116,6 +117,30 @@ def load_picks(team_id: int, bootstrap: Dict[str, Any]) -> Tuple[Dict[str, Any],
     return picks, notes
 
 
+def recent_form(bootstrap: Dict[str, Any], squad: List[int], per_pos: int = 45, last: int = 4) -> Dict[int, Dict[str, Any]]:
+    """Starts in the last few matches for your squad and the likeliest transfer targets."""
+    els = [p for p in bootstrap.get("elements") or [] if p.get("status") not in ("u", "n") and float(p.get("minutes") or 0) > 0]
+    ids = set(squad)
+    for pos in (1, 2, 3, 4):
+        cands = [p for p in els if p["element_type"] == pos]
+        cands.sort(key=lambda p: float(p.get("form") or 0) + float(p.get("points_per_game") or 0), reverse=True)
+        ids.update(p["id"] for p in cands[:per_pos])
+
+    def one(pid: int) -> Tuple[int, Optional[Dict[str, Any]]]:
+        try:
+            hist = (fpl_get(f"/element-summary/{pid}/", ttl=900).get("history") or [])[-last:]
+        except RuntimeError:
+            return pid, None
+        if not hist:
+            return pid, None
+        starts = sum(1 for h in hist if int(h.get("starts") or 0) == 1 or (h.get("starts") is None and int(h.get("minutes") or 0) >= 60))
+        return pid, {"games": len(hist), "starts": starts, "start_rate": starts / len(hist),
+                     "minutes": [int(h.get("minutes") or 0) for h in hist]}
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return {pid: r for pid, r in pool.map(one, sorted(ids)) if r}
+
+
 def load_team(team_id: int) -> Dict[str, Any]:
     bootstrap = fpl_get("/bootstrap-static/", ttl=300)
     fixtures = fpl_get("/fixtures/", ttl=300)
@@ -126,7 +151,9 @@ def load_team(team_id: int) -> Dict[str, Any]:
     except RuntimeError:
         transfers = None
     picks, notes = load_picks(team_id, bootstrap)
-    return build_advice(bootstrap, fixtures, entry, history, picks, transfers=transfers, notes=notes)
+    squad = [p["element"] for p in picks.get("picks") or []]
+    recent = recent_form(bootstrap, squad)
+    return build_advice(bootstrap, fixtures, entry, history, picks, transfers=transfers, notes=notes, recent=recent)
 
 
 def load_signals(team_id: int, refresh: bool) -> Dict[str, Any]:

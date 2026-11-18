@@ -188,11 +188,13 @@ def build_signals(team_id: int, bootstrap: Dict[str, Any], squad_ids: List[int],
     squad_rows.sort(key=lambda r: {"bad": 0, "warn": 1, "ok": 2}[r["level"]])
 
     # 4) Transfer momentum
-    by_in = sorted(elements.values(), key=lambda p: _f(p.get("transfers_in_event")), reverse=True)[:10]
-    by_out = sorted(elements.values(), key=lambda p: _f(p.get("transfers_out_event")), reverse=True)[:10]
+    by_in = sorted(elements.values(), key=lambda p: _f(p.get("transfers_in_event")), reverse=True)[:12]
+    by_out = sorted(elements.values(), key=lambda p: _f(p.get("transfers_out_event")), reverse=True)[:12]
     momentum = {
-        "in": [{**label(p), "count": int(_f(p.get("transfers_in_event")))} for p in by_in],
-        "out": [{**label(p), "count": int(_f(p.get("transfers_out_event")))} for p in by_out],
+        "in": [{**label(p), "count": int(_f(p.get("transfers_in_event"))),
+                "net": int(_f(p.get("transfers_in_event")) - _f(p.get("transfers_out_event")))} for p in by_in],
+        "out": [{**label(p), "count": int(_f(p.get("transfers_out_event"))),
+                 "net": int(_f(p.get("transfers_in_event")) - _f(p.get("transfers_out_event")))} for p in by_out],
     }
 
     # 5) Headlines mentioning your players

@@ -30,6 +30,7 @@ WEIGHTS = [1.0, 0.92, 0.85, 0.78, 0.72, 0.66]  # later weeks are less certain
 TRANSFER_HORIZON = 5  # gameweeks used to judge a transfer
 HIT_COST = 4
 ROLL_VALUE = 1.5  # rough value of banking a free transfer
+FODDER_GK_MAX = 45  # £4.5m: a backup keeper this cheap is assumed to be bench fodder
 
 CHIP_LABELS = {
     "wildcard": "Wildcard",
@@ -261,8 +262,11 @@ def fixture_points(r: PlayerRates, rules: Dict[str, Any], att_mult: float, lam_a
 
 
 class Projector:
-    def __init__(self, bootstrap: Dict[str, Any], fx: FixtureIndex, horizon: List[int]):
+    def __init__(self, bootstrap: Dict[str, Any], fx: FixtureIndex, horizon: List[int],
+                 recent: Optional[Dict[int, Dict[str, Any]]] = None):
         self.fx = fx
+        self.recent = recent or {}
+        self.total_players = max(_f(bootstrap.get("total_players"), 10_000_000), 1.0)
         self.tm = TeamModel(bootstrap.get("teams") or [], fx)
         self.rules = scoring_rules(bootstrap)
         self.horizon = horizon
@@ -274,6 +278,12 @@ class Projector:
     def _project(self, p: Dict[str, Any]) -> List[float]:
         team = p["team"]
         r = PlayerRates(p, self.fx.games_played[team])
+        # Signal 1: recent minutes. Weight the last few matches equally with the whole season,
+        # so a player who has been dropped or rotated is caught quickly.
+        rec = self.recent.get(p["id"])
+        if rec and rec.get("games", 0) >= 3:
+            r.start_rate = 0.5 * r.start_rate + 0.5 * rec["start_rate"]
+            r.sub_rate = min(1 - r.start_rate, 0.3) if _f(p.get("minutes")) > 0 else 0.0
         self.rates[p["id"]] = r
         lam_avg = self.tm.mu * self.tm.d_avg(team)
         out: List[float] = []
@@ -286,6 +296,12 @@ class Projector:
                 att_mult, lam_against = self.tm.fixture(team, g["opp"], g["home"])
                 total += fixture_points(r, self.rules, att_mult, lam_against, lam_avg, av)
             out.append(total)
+        # Signal 2: transfer momentum. The crowd often reacts to team news before the flags do.
+        # Capped at +/-4% so it nudges rather than drives the projection.
+        net = _f(p.get("transfers_in_event")) - _f(p.get("transfers_out_event"))
+        owners = max(_f(p.get("selected_by_percent")) * self.total_players / 100.0, 20000.0)
+        mom = 1.0 + 0.04 * math.tanh(5.0 * net / owners)
+        out = [x * mom for x in out]
         # Early in the season, lean on the game's own next-week estimate (ep_next). Later it adds
         # nothing: ep_next is essentially recent form, which the model already uses.
         ep = _f(p.get("ep_next"), -1.0)
@@ -386,7 +402,8 @@ def _club_ok(squad: Sequence[int], elements: Dict[int, Dict[str, Any]]) -> bool:
 
 def transfer_options(squad: List[int], elements: Dict[int, Dict[str, Any]], pos: Dict[int, int],
                      xpts: Dict[int, List[float]], sell: Dict[int, int], bank: int,
-                     pools: Dict[int, List[int]]) -> Dict[str, Any]:
+                     pools: Dict[int, List[int]], locked: Optional[set] = None) -> Dict[str, Any]:
+    locked = locked or set()
     n = min(TRANSFER_HORIZON, len(next(iter(xpts.values()), [])))
     hsum = {i: sum(WEIGHTS[k] * v for k, v in enumerate(xpts[i][:n])) for i in xpts}
     base = squad_value(squad, pos, xpts, n)
@@ -396,6 +413,8 @@ def transfer_options(squad: List[int], elements: Dict[int, Dict[str, Any]], pos:
     # Singles: screen with a quick estimate, then score properly.
     singles_raw = []
     for out in squad:
+        if out in locked:
+            continue
         budget = bank + sell[out]
         p_out = pos[out]
         for cand in pools[p_out]:
@@ -421,6 +440,8 @@ def transfer_options(squad: List[int], elements: Dict[int, Dict[str, Any]], pos:
     for a_i in range(len(squad)):
         for b_i in range(a_i + 1, len(squad)):
             o1, o2 = squad[a_i], squad[b_i]
+            if o1 in locked or o2 in locked:
+                continue
             budget = bank + sell[o1] + sell[o2]
             base_h = hsum[o1] + hsum[o2]
             tc = team_count.copy()
@@ -551,7 +572,8 @@ def build_squad(elements: Dict[int, Dict[str, Any]], pos: Dict[int, int], pools:
 def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entry: Dict[str, Any],
                  history: Dict[str, Any], picks: Dict[str, Any],
                  transfers: Optional[List[Dict[str, Any]]] = None,
-                 notes: Optional[List[str]] = None) -> Dict[str, Any]:
+                 notes: Optional[List[str]] = None,
+                 recent: Optional[Dict[int, Dict[str, Any]]] = None) -> Dict[str, Any]:
     notes = list(notes or [])
     events = bootstrap.get("events") or []
     ev_by_id = {e["id"]: e for e in events}
@@ -566,7 +588,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     elements = {p["id"]: p for p in bootstrap.get("elements") or []}
     pos = {i: p["element_type"] for i, p in elements.items()}
     fx = FixtureIndex(fixtures)
-    proj = Projector(bootstrap, fx, horizon)
+    recent = recent or {}
+    proj = Projector(bootstrap, fx, horizon, recent)
     xpts = proj.xpts
     total_players = int(_f(bootstrap.get("total_players"), 10_000_000))
 
@@ -632,6 +655,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             "net_transfers": net,
             "price_trend": "rising" if net / owners > 0.04 and net > 20000 else "falling" if net / owners < -0.04 and net < -20000 else "",
             "cost_change_event": _price(p.get("cost_change_event")),
+            "recent_starts": (f"{recent[pid]['starts']}/{recent[pid]['games']}" if pid in recent else None),
+            "momentum": net,
         }
 
     # ---- lineup for next GW
@@ -664,7 +689,11 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         pools[pid_pos] = sorted(seen_ids, key=lambda i: hsum5[i], reverse=True)
 
     # ---- transfers
-    opts = transfer_options(squad, elements, pos, xpts, sell, bank, pools)
+    # A cheap backup keeper who never plays is deliberate "fodder": don't suggest replacing him.
+    fodder = {i for i in squad if pos[i] == 1 and i not in lineup["xi"] and int(_f(elements[i].get("now_cost"))) <= FODDER_GK_MAX}
+    for i in fodder:
+        notes.append(f"{elements[i]['web_name']} is treated as backup-keeper fodder and won't be suggested as a transfer out.")
+    opts = transfer_options(squad, elements, pos, xpts, sell, bank, pools, locked=fodder)
     plan = pick_plan(opts, ft)
 
     def move_view(m: Dict[str, Any]) -> Dict[str, Any]:
@@ -680,6 +709,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     # Sell watchlist: injury, poor projection for price, bad fixtures, falling price.
     sell_list = []
     for i in squad:
+        if i in fodder:
+            continue
         p = elements[i]
         reasons = []
         severity = 0.0
@@ -705,6 +736,14 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         if blanks:
             reasons.append(f"Blank in {blanks} of the next 4 GWs")
             severity += blanks
+        rec = recent.get(i)
+        if rec and rec.get("games", 0) >= 3 and rec["starts"] <= rec["games"] - 2 and st == "a":
+            reasons.append(f"Rotation risk: started {rec['starts']} of the last {rec['games']}")
+            severity += 1.5
+        net_i = int(_f(p.get("transfers_in_event"))) - int(_f(p.get("transfers_out_event")))
+        if net_i < -50000:
+            reasons.append(f"Heavily sold this week ({net_i:,} net)")
+            severity += 0.5
         if _f(p.get("form")) < 2 and _f(p.get("minutes")) > 0 and pos[i] != 1:
             reasons.append(f"Poor form ({p.get('form')})")
             severity += 0.5
@@ -926,8 +965,9 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         cap = elements[lineup["captain"]]["web_name"]
         vice = elements[lineup["vice"]]["web_name"] if lineup["vice"] else "-"
         actions.append(f"Captain {cap}, vice {vice}.")
+    leaving = {elements[i]["web_name"] for i in ((best["moves"] or {}).get("outs") or [])}
     for c in changes:
-        if not c.startswith("Captain"):
+        if not c.startswith("Captain") and not any(c.startswith(f"Bench {n} ") for n in leaving):
             actions.append(f"Lineup: {c}.")
     for row in chip_view.values():
         if row["status"] in ("play", "urgent"):
@@ -938,6 +978,12 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     for pv in price_watch:
         if pv["price_trend"] == "falling" and any(m == pv["id"] for m in (best["moves"] or {}).get("outs", [])):
             actions.append(f"Sell {pv['name']} early. Their price looks likely to drop.")
+
+    if best["moves"]:
+        for pid_in in best["moves"]["in"]:
+            pv = player_view(pid_in)
+            if pv["price_trend"] == "rising":
+                actions.append(f"Buy {pv['name']} early. They're heavily bought ({pv['momentum']:+,} this week) and their price may rise.")
 
     deadline = nxt.get("deadline_time")
     try:
