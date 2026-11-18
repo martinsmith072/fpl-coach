@@ -19,6 +19,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+import core_insights
+
 POS = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
 SQUAD_COUNT = {1: 2, 2: 5, 3: 5, 4: 3}
 PLAY_MIN = {1: 1, 2: 3, 3: 2, 4: 1}
@@ -160,7 +162,8 @@ class TeamModel:
     """Attack strength and defensive weakness per team and venue (1.0 = league average)."""
 
     def __init__(self, teams: Sequence[Dict[str, Any]], fx: FixtureIndex,
-                 elements: Optional[Sequence[Dict[str, Any]]] = None):
+                 elements: Optional[Sequence[Dict[str, Any]]] = None, core: Optional[Dict[str, Any]] = None):
+        core_tm = (core or {}).get("team_matches") or {}
         total_goals = sum(fx.goals_for.values())
         total_games = sum(fx.games_played.values())
         mu = total_goals / total_games if total_games >= 20 else 1.4
@@ -194,6 +197,19 @@ class TeamModel:
                 xga = gk_xgc * (gp * 90.0 / gk_min) if gk_min >= 90 else ga
                 gf = 0.35 * gf + 0.65 * xgf[tid]
                 ga = 0.35 * ga + 0.65 * xga
+            if core_tm.get(tid):
+                # Match-by-match xG, with recent matches counting more (each older match x0.9).
+                wsum = xf = xa = g_f = g_a = 0.0
+                for j, m in enumerate(reversed(core_tm[tid])):
+                    w = 0.9 ** j
+                    wsum += w
+                    xf += w * m["xgf"]
+                    xa += w * m["xga"]
+                    g_f += w * m["gf"]
+                    g_a += w * m["ga"]
+                gp = wsum
+                gf = 0.25 * g_f + 0.75 * xf
+                ga = 0.25 * g_a + 0.75 * xa
             att_res = ((gf + self.mu * k) / (gp + k)) / self.mu
             dw_res = ((ga + self.mu * k) / (gp + k)) / self.mu
             w_res = _clip(gp / (gp + 4.0), 0.0, 0.85)
@@ -228,7 +244,7 @@ class PlayerRates:
         "yc90", "p_defcon", "form_mult",
     )
 
-    def __init__(self, p: Dict[str, Any], team_games: int):
+    def __init__(self, p: Dict[str, Any], team_games: int, rs: Optional[Dict[str, Any]] = None):
         self.pos = p["element_type"]
         mins = _f(p.get("minutes"))
         n90 = mins / 90.0
@@ -263,6 +279,22 @@ class PlayerRates:
         form = _f(p.get("form"))
         ppg = _f(p.get("points_per_game"))
         self.form_mult = 1.0 + 0.15 * _clip((form - ppg) / max(ppg, 2.0), -1.0, 1.0)
+        if rs and rs.get("mins_total", 0) >= 90:
+            # Recent underlying form (last 6 league matches): chances, not points. It counts for 40%,
+            # and is itself steadied towards the season rate so one big game can't dominate.
+            n90r = rs["mins_total"] / 90.0
+            rec_xg = (rs["xg"] + self.xg90 * 3.0) / (n90r + 3.0)
+            rec_xa = (rs["xa"] + self.xa90 * 3.0) / (n90r + 3.0)
+            self.xg90 = 0.6 * self.xg90 + 0.4 * rec_xg
+            self.xa90 = 0.6 * self.xa90 + 0.4 * rec_xa
+            if rs.get("games", 0) >= 3:
+                self.start_rate = 0.5 * self.start_rate + 0.5 * rs["starts"] / rs["games"]
+                self.sub_rate = min(1 - self.start_rate, 0.3) if mins > 0 else 0.0
+            if self.pos in DEFCON_THRESHOLD and rs.get("defcon"):
+                hits = sum(1 for d in rs["defcon"] if d >= DEFCON_THRESHOLD[self.pos])
+                self.p_defcon = (hits + self.p_defcon * 3.0) / (len(rs["defcon"]) + 3.0)
+            # Underlying numbers now carry form, so points-based form only nudges lightly.
+            self.form_mult = 1.0 + 0.5 * (self.form_mult - 1.0)
 
 
 def availability(p: Dict[str, Any], k: int) -> float:
@@ -306,11 +338,14 @@ def fixture_points(r: PlayerRates, rules: Dict[str, Any], att_mult: float, lam_a
 
 class Projector:
     def __init__(self, bootstrap: Dict[str, Any], fx: FixtureIndex, horizon: List[int],
-                 recent: Optional[Dict[int, Dict[str, Any]]] = None):
+                 recent: Optional[Dict[int, Dict[str, Any]]] = None, core: Optional[Dict[str, Any]] = None,
+                 ext_avail: Optional[Dict[int, float]] = None):
         self.fx = fx
+        self.ext_avail = ext_avail or {}
         self.recent = recent or {}
         self.total_players = max(_f(bootstrap.get("total_players"), 10_000_000), 1.0)
-        self.tm = TeamModel(bootstrap.get("teams") or [], fx, bootstrap.get("elements") or [])
+        self.core = core
+        self.tm = TeamModel(bootstrap.get("teams") or [], fx, bootstrap.get("elements") or [], core)
         self.rules = scoring_rules(bootstrap)
         self.horizon = horizon
         self.xpts: Dict[int, List[float]] = {}
@@ -320,10 +355,11 @@ class Projector:
 
     def _project(self, p: Dict[str, Any]) -> List[float]:
         team = p["team"]
-        r = PlayerRates(p, self.fx.games_played[team])
+        rs = core_insights.recent_summary(self.core, p["id"])
+        r = PlayerRates(p, self.fx.games_played[team], rs)
         # Signal 1: recent minutes. Weight the last few matches equally with the whole season,
-        # so a player who has been dropped or rotated is caught quickly.
-        rec = self.recent.get(p["id"])
+        # so a player who has been dropped or rotated is caught quickly. (Match data already covers this.)
+        rec = None if rs else self.recent.get(p["id"])
         if rec and rec.get("games", 0) >= 3:
             r.start_rate = 0.5 * r.start_rate + 0.5 * rec["start_rate"]
             r.sub_rate = min(1 - r.start_rate, 0.3) if _f(p.get("minutes")) > 0 else 0.0
@@ -332,6 +368,8 @@ class Projector:
         out: List[float] = []
         for k, ev in enumerate(self.horizon):
             av = availability(p, k)
+            if k == 0 and p["id"] in self.ext_avail:
+                av = min(av, self.ext_avail[p["id"]])  # a second source says they'll miss / may miss it
             total = 0.0
             for g in self.fx.get(team, ev):
                 if g["opp"] not in self.tm.A:
@@ -655,7 +693,9 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                  history: Dict[str, Any], picks: Dict[str, Any],
                  transfers: Optional[List[Dict[str, Any]]] = None,
                  notes: Optional[List[str]] = None,
-                 recent: Optional[Dict[int, Dict[str, Any]]] = None) -> Dict[str, Any]:
+                 recent: Optional[Dict[int, Dict[str, Any]]] = None,
+                 core: Optional[Dict[str, Any]] = None,
+                 ext_injuries: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     notes = list(notes or [])
     events = bootstrap.get("events") or []
     ev_by_id = {e["id"]: e for e in events}
@@ -671,7 +711,30 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     pos = {i: p["element_type"] for i, p in elements.items()}
     fx = FixtureIndex(fixtures)
     recent = recent or {}
-    proj = Projector(bootstrap, fx, horizon, recent)
+
+    def recent_view(pid: int) -> Optional[Dict[str, Any]]:
+        rs = core_insights.recent_summary(core, pid)
+        if not rs:
+            return None
+        n90 = rs["mins_total"] / 90.0
+        return {"games": rs["games"], "starts": rs["starts"], "minutes": rs["minutes"],
+                "xg": _r(rs["xg"]), "xa": _r(rs["xa"]), "shots": int(rs["shots"]),
+                "xgi90": _r((rs["xg"] + rs["xa"]) / n90) if n90 >= 1 else None}
+
+    def recent_starts(pid: int) -> Optional[str]:
+        rs = core_insights.recent_summary(core, pid)
+        if rs:
+            return f"{rs['starts']}/{rs['games']}"
+        return f"{recent[pid]['starts']}/{recent[pid]['games']}" if pid in recent else None
+
+    ext = (ext_injuries or {}).get("by_player") or {}
+    ext_avail: Dict[int, float] = {}
+    for pid_e, info in ext.items():
+        el = elements.get(pid_e)
+        if not el or (el.get("status") or "a") != "a":
+            continue  # FPL already flags them; its own chance of playing is used
+        ext_avail[pid_e] = 0.25 if "missing" in str(info.get("type", "")).lower() else 0.6
+    proj = Projector(bootstrap, fx, horizon, recent, core, ext_avail)
     xpts = proj.xpts
     total_players = int(_f(bootstrap.get("total_players"), 10_000_000))
 
@@ -737,7 +800,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             "net_transfers": net,
             "price_trend": "rising" if net / owners > 0.04 and net > 20000 else "falling" if net / owners < -0.04 and net < -20000 else "",
             "cost_change_event": _price(p.get("cost_change_event")),
-            "recent_starts": (f"{recent[pid]['starts']}/{recent[pid]['games']}" if pid in recent else None),
+            "recent_starts": recent_starts(pid),
+            "recent": recent_view(pid),
             "momentum": net,
         }
 
@@ -792,7 +856,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                 "fixtures": cells, "avg_fdr": _r(sum(fd) / len(fd), 2) if fd else None, "form": _f(p.get("form")),
                 "status": p.get("status") or "a", "chance": p.get("chance_of_playing_next_round"), "news": p.get("news") or "",
                 "selected": _f(p.get("selected_by_percent")),
-                "recent_starts": (f"{recent[i]['starts']}/{recent[i]['games']}" if i in recent else None)}
+                "recent_starts": recent_starts(i), "recent": recent_view(i)}
 
     def move_view(m: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -833,6 +897,9 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         if blanks:
             reasons.append(f"Blank in {blanks} of the next 4 GWs")
             severity += blanks
+        if i in ext and st == "a":
+            reasons.append(f"API-Football lists them as '{ext[i]['type']}' ({ext[i]['reason']}) for the next match, though FPL hasn't flagged them yet")
+            severity += 2.5 if "missing" in str(ext[i]["type"]).lower() else 1.0
         rec = recent.get(i)
         if rec and rec.get("games", 0) >= 3 and rec["starts"] <= rec["games"] - 2 and st == "a":
             reasons.append(f"Rotation risk: started {rec['starts']} of the last {rec['games']}")
@@ -877,7 +944,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     # Chips are judged over their whole window (up to 9 weeks ahead), so project further than usual.
     CHIP_LOOK = 9
     chip_h = list(range(next_gw, min(last_gw, next_gw + CHIP_LOOK - 1 + TRANSFER_HORIZON - 1) + 1))
-    lp = Projector(bootstrap, fx, chip_h, recent).xpts
+    lp = Projector(bootstrap, fx, chip_h, recent, core, ext_avail).xpts
     chip_weeks = chip_h[:CHIP_LOOK]
     mv_best = plan["best"]["moves"]
     after = list(squad)
@@ -1217,7 +1284,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             "squad_value": _price(squad_sell_value),
             "team_value": _price(sum(elements[i]["now_cost"] for i in squad)),
             "picks_gw": eh.get("event"),
-            "notes": notes + ["Free transfers are estimated from your transfer history.",
+            "notes": notes + ([f"Match data (xG by match, recent form, defensive actions): FPL-Core-Insights, GW1–{max((m['gw'] for ms in core['team_matches'].values() for m in ms), default=0)}."]
+                              if core and core.get("team_matches") else ["Match-level data unavailable this run; using FPL season totals."]) + ["Free transfers are estimated from your transfer history.",
                               "Transfers you've already made for the next GW aren't visible until the deadline passes."],
         },
         "manager": {
@@ -1252,4 +1320,13 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         "players": players_tbl,
         "history": {"gws": hist_out, "totals": hist_tot},
         "price_watch": price_watch,
+        "external_injuries": {
+            "status": (ext_injuries or {}).get("status", "not configured"),
+            "error": (ext_injuries or {}).get("error"),
+            "players": sorted([{**{k: v for k, v in player_view(pid_e).items() if k in ("id", "name", "team", "pos", "price", "selected", "status", "chance", "news")},
+                                "type": info.get("type"), "reason": info.get("reason"), "date": info.get("date"),
+                                "mine": pid_e in squad, "fpl_flagged": (elements[pid_e].get("status") or "a") != "a"}
+                               for pid_e, info in ext.items() if pid_e in elements],
+                              key=lambda x: (not x["mine"], x["fpl_flagged"], -x["selected"])),
+        },
     }

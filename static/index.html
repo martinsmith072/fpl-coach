@@ -301,7 +301,7 @@ function mvRow(o,side,gws){
   const cells=gws.map((g,k)=>{const c=(o.fixtures||[])[k]||[];const x=(o.xpts||[])[k];
     return `<td class="mvc">${c.length?c.map(f=>`<span class="fdr fdr${f.fdr||3}">${esc(f.opp)}${f.home?"":" (a)"}</span>`).join(""):`<span class="fdr blank">–</span>`}<div class="mvx">${x==null?"–":fmt(x)}</div></td>`}).join("");
   const st=o.status&&o.status!=="a"?` <span class="pill ${o.chance!=null&&o.chance>25?"warn":"bad"}" title="${esc(o.news)}">${o.chance??0}%</span>`:"";
-  return `<tr class="${side}"><td class="mvn"><span class="${side}">${side==="out"?"−":"+"} ${esc(o.name)}</span>${st}<div class="small muted">${esc(o.team)} · ${o.pos||""} · £${fmt(o.price)} · form ${fmt(o.form)}${o.recent_starts?` · started ${o.recent_starts}`:""}</div></td>${cells}
+  return `<tr class="${side}"><td class="mvn"><span class="${side}">${side==="out"?"−":"+"} ${esc(o.name)}</span>${st}<div class="small muted">${esc(o.team)} · ${o.pos||""} · £${fmt(o.price)} · form ${fmt(o.form)}${o.recent_starts?` · started ${o.recent_starts}`:""}</div>${o.recent?`<div class="small muted">Last ${o.recent.games}: xG ${fmt(o.recent.xg)} · xA ${fmt(o.recent.xa)} · ${o.recent.shots} shots</div>`:""}</td>${cells}
    <td class="num"><b>${fmt(o.xpts_h)}</b><div class="small muted">diff ${o.avg_fdr==null?"–":fmt(o.avg_fdr,1)}</div></td></tr>`}
 function mv(m){
   const gws=m.gws||[];const has=gws.length&&(m.out[0]||{}).xpts;
@@ -444,13 +444,14 @@ function players(){
   let rows=D.players.filter(p=>(posFilter==="ALL"||p.pos===posFilter)&&(!maxPrice||p.price<=+maxPrice)&&(!search||(p.name+" "+p.full_name+" "+p.team).toLowerCase().includes(search.toLowerCase())));
   rows.sort((a,b)=>{const x=a[sortKey],y=b[sortKey];return (typeof x==="string"?x.localeCompare(y):x-y)*sortDir});
   const owned=new Set(D.squad.map(p=>p.id));
-  const cols=[["name","Player"],["price","£"],["form","Form"],["total_points","Pts"],["xg","xG"],["xa","xA"],["selected","Own%"],["xpts_next","Next"],["xpts_h",`${D.meta.transfer_horizon}GW`]];
+  D.players.forEach(p=>{p.xgi6=p.recent&&p.recent.xgi90!=null?p.recent.xgi90:-1});
+  const cols=[["name","Player"],["price","£"],["form","Form"],["total_points","Pts"],["xg","xG"],["xa","xA"],["xgi6","xGI/90 L6"],["selected","Own%"],["xpts_next","Next"],["xpts_h",`${D.meta.transfer_horizon}GW`]];
   return head()+`<div class="card"><h2>Player projections</h2>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><input id="q" placeholder="Search" value="${esc(search)}"><select id="pf">${["ALL","GKP","DEF","MID","FWD"].map(p=>`<option${p===posFilter?" selected":""}>${p}</option>`).join("")}</select><input id="mp" placeholder="Max £m" size="7" value="${esc(maxPrice)}"></div>
   <div class="scroll"><table><tr>${cols.map(([k,l])=>`<th class="sort ${k==="name"?"":"num"}" data-k="${k}">${l}${sortKey===k?(sortDir<0?" ↓":" ↑"):""}</th>`).join("")}<th>Fixtures</th></tr>
   ${rows.slice(0,150).map(p=>`<tr><td class="${owned.has(p.id)?"mine":""}">${esc(p.name)} <span class="muted small">${esc(p.team)} · ${p.pos}</span>${p.status!=="a"?` <span class="pill warn" title="${esc(p.news)}">${p.chance??0}%</span>`:""}${p.price_trend?` <span class="small" title="Price ${p.price_trend}">${p.price_trend==="rising"?"▲":"▼"}</span>`:""}</td>
-   <td class="num">${fmt(p.price)}</td><td class="num">${fmt(p.form)}</td><td class="num">${p.total_points}</td><td class="num">${fmt(p.xg,2)}</td><td class="num">${fmt(p.xa,2)}</td><td class="num">${fmt(p.selected)}</td><td class="num">${fmt(p.xpts_next)}</td><td class="num"><b>${fmt(p.xpts_h)}</b></td><td>${fx(p.fixtures.slice(0,4))}</td></tr>`).join("")}</table></div>
-  <div class="note">Bold names are in your squad. ▲▼ = net transfers suggest a price change soon.</div></div>`;
+   <td class="num">${fmt(p.price)}</td><td class="num">${fmt(p.form)}</td><td class="num">${p.total_points}</td><td class="num">${fmt(p.xg,2)}</td><td class="num">${fmt(p.xa,2)}</td><td class="num">${p.xgi6>=0?fmt(p.xgi6,2):"–"}</td><td class="num">${fmt(p.selected)}</td><td class="num">${fmt(p.xpts_next)}</td><td class="num"><b>${fmt(p.xpts_h)}</b></td><td>${fx(p.fixtures.slice(0,4))}</td></tr>`).join("")}</table></div>
+  <div class="note">Bold names are in your squad. ▲▼ = net transfers suggest a price change soon. “xGI/90 L6” = expected goals plus assists per 90 minutes over the last 6 league matches: the best guide to whether form is real.</div></div>`;
 }
 
 function history(){
@@ -474,6 +475,18 @@ function history(){
   ${[...g].reverse().map(x=>`<tr><td>${x.gw}</td><td class="num"><b>${x.points}</b></td><td class="num">${x.avg??"–"}</td><td class="num">${x.bench}</td><td class="num">${x.transfers}</td><td class="num">${x.hits?"−"+x.hits:""}</td><td>${x.chip?`<span class="pill">${esc(x.chip)}</span>`:""}</td><td class="num">${big(x.overall_rank)}</td></tr>`).join("")}</table></div></div>`;
 }
 
+function extCard(){
+  const X=D.external_injuries||{status:"not configured",players:[]};
+  let inner;
+  if(X.status==="not configured")inner=`<p class="small">Not connected yet. Add a free API-Football key as a GitHub secret called <code>API_FOOTBALL_KEY</code> to cross-check FPL's injury flags with a second source.</p>`;
+  else if(X.status==="error")inner=`<p class="small"><span class="pill warn">unavailable</span> ${esc(X.error||"")}</p>`;
+  else if(!X.players.length)inner=`<p class="small muted">No Premier League absences listed for the next round.</p>`;
+  else inner=`<div class="scroll"><table><tr><th>Player</th><th>API-Football</th><th>FPL</th></tr>${X.players.slice(0,30).map(p=>`<tr><td class="${p.mine?"mine":""}">${esc(p.name)} <span class="muted small">${esc(p.team)} · ${p.pos}</span>${p.mine?'<span class="tag">yours</span>':""}</td>
+    <td><span class="pill ${/missing/i.test(p.type)?"bad":"warn"}">${esc(p.type)}</span> <span class="small">${esc(p.reason)}</span></td>
+    <td class="small">${p.fpl_flagged?`${p.chance??0}% ${esc(p.news)}`:'<span style="color:var(--warn)">not flagged</span>'}</td></tr>`).join("")}</table></div>
+    <div class="note">“Not flagged” means API-Football expects an absence that FPL hasn't flagged yet. The model already lowers those players' chances for the next match (missing: 25%, questionable: 60%).</div>`;
+  return `<div class="card" style="margin-top:14px"><h2>Second opinion: API-Football injuries & suspensions</h2>${inner}</div>`;
+}
 function signals(){
   const last=store.get("sig_at_"+D.manager.id);
   let body;
@@ -503,7 +516,7 @@ function signals(){
   return head()+`<div class="card" style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
    <div><b>Player signals</b><div class="small muted">${STATIC?"Updated "+new Date(STATIC.built).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"})+(STATIC.trigger==="schedule"?" (scheduled)":""):last?"Last refreshed "+new Date(last).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"}):"Not refreshed yet"}</div></div>
    ${STATIC?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><a href="${esc(workflowUrl())}" target="_blank" rel="noopener"><button type="button">Refresh signals + advice</button></a><span class="small muted" style="max-width:300px">Opens GitHub: press <b>Run workflow</b>, wait about 2 minutes, then reload this page.</span></div>`
-   :`<div style="display:flex;gap:8px"><button id="sigbtn">Refresh signals</button><button class="ghost" id="reanalyse" title="Re-run the projections with the latest news">Refresh signals + advice</button></div>`}</div>${body}`;
+   :`<div style="display:flex;gap:8px"><button id="sigbtn">Refresh signals</button><button class="ghost" id="reanalyse" title="Re-run the projections with the latest news">Refresh signals + advice</button></div>`}</div>${body}${extCard()}`;
 }
 
 async function loadSignals(alsoAdvice){

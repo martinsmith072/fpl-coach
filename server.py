@@ -20,6 +20,8 @@ from urllib.parse import parse_qs, urlparse
 
 from fpl_engine import build_advice
 from signals import build_signals
+import core_insights
+import api_football
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(ROOT, "static")
@@ -152,8 +154,22 @@ def load_team(team_id: int) -> Dict[str, Any]:
         transfers = None
     picks, notes = load_picks(team_id, bootstrap)
     squad = [p["element"] for p in picks.get("picks") or []]
-    recent = recent_form(bootstrap, squad)
-    return build_advice(bootstrap, fixtures, entry, history, picks, transfers=transfers, notes=notes, recent=recent)
+    try:
+        core = core_insights.load(bootstrap)
+        if not core["team_matches"]:
+            core = None
+    except Exception:  # the extra data is a bonus; never fail the page over it
+        core = None
+    # Per-player match history from FPL is only needed when the match dataset is unavailable.
+    recent = {} if core else recent_form(bootstrap, squad)
+    ext = api_football.fetch(bootstrap)
+    if ext["status"] == "ok":
+        notes.append(f"Injuries & suspensions cross-checked with API-Football ({ext['upcoming']} players listed for the next match).")
+    elif ext["status"] == "error":
+        notes.append(f"API-Football unavailable this run: {ext['error']}")
+    advice = build_advice(bootstrap, fixtures, entry, history, picks, transfers=transfers, notes=notes,
+                          recent=recent, core=core, ext_injuries=ext)
+    return advice
 
 
 def load_signals(team_id: int, refresh: bool) -> Dict[str, Any]:

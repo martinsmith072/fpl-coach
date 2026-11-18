@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FPL_TEAM_IDS: ${{ vars.FPL_TEAM_IDS }}   # optional override; normally the list in teams.json is used
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}   # optional: injuries cross-check
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

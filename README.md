@@ -41,6 +41,11 @@ Open http://127.0.0.1:8765 and enter your team ID. That's the number in your FPL
 2. **Friday, after the press conferences:** go to *Signals* and press **Refresh signals + advice**. The FPL injury flags update after the pressers, and the projections are re-run with the new news.
 3. **Before the deadline:** refresh once more and set your captain.
 
+## Data sources
+- **Official FPL API**: players, prices, fixtures, your team, injury flags.
+- **[FPL-Core-Insights](https://github.com/olbauday/FPL-Core-Insights)** by olbauday: match-by-match xG for every team and recent per-player xG, xA, shots, starts and defensive actions (updated twice daily). Used for fixture difficulty and recent underlying form.
+- **[API-Football](https://www.api-football.com/)** (optional): injuries and suspensions as a second opinion to FPL's flags. Add a free key as the GitHub secret `API_FOOTBALL_KEY`.
+
 ## How the projections work
 Expected points (xPts) for each player and fixture are built from:
 - **Season stats:** xG, xA, bonus, saves and defensive contributions, each per 90 minutes, steadied for small samples
