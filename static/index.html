@@ -475,18 +475,6 @@ function history(){
   ${[...g].reverse().map(x=>`<tr><td>${x.gw}</td><td class="num"><b>${x.points}</b></td><td class="num">${x.avg??"–"}</td><td class="num">${x.bench}</td><td class="num">${x.transfers}</td><td class="num">${x.hits?"−"+x.hits:""}</td><td>${x.chip?`<span class="pill">${esc(x.chip)}</span>`:""}</td><td class="num">${big(x.overall_rank)}</td></tr>`).join("")}</table></div></div>`;
 }
 
-function extCard(){
-  const X=D.external_injuries||{status:"not configured",players:[]};
-  let inner;
-  if(X.status==="not configured")inner=`<p class="small">Not connected yet. Add a free API-Football key as a GitHub secret called <code>API_FOOTBALL_KEY</code> to cross-check FPL's injury flags with a second source.</p>`;
-  else if(X.status==="error")inner=`<p class="small"><span class="pill warn">unavailable</span> ${esc(X.error||"")}</p>`;
-  else if(!X.players.length)inner=`<p class="small muted">No Premier League absences listed for the next round.</p>`;
-  else inner=`<div class="scroll"><table><tr><th>Player</th><th>API-Football</th><th>FPL</th></tr>${X.players.slice(0,30).map(p=>`<tr><td class="${p.mine?"mine":""}">${esc(p.name)} <span class="muted small">${esc(p.team)} · ${p.pos}</span>${p.mine?'<span class="tag">yours</span>':""}</td>
-    <td><span class="pill ${/missing/i.test(p.type)?"bad":"warn"}">${esc(p.type)}</span> <span class="small">${esc(p.reason)}</span></td>
-    <td class="small">${p.fpl_flagged?`${p.chance??0}% ${esc(p.news)}`:'<span style="color:var(--warn)">not flagged</span>'}</td></tr>`).join("")}</table></div>
-    <div class="note">“Not flagged” means API-Football expects an absence that FPL hasn't flagged yet. The model already lowers those players' chances for the next match (missing: 25%, questionable: 60%).</div>`;
-  return `<div class="card" style="margin-top:14px"><h2>Second opinion: API-Football injuries & suspensions</h2>${inner}</div>`;
-}
 function signals(){
   const last=store.get("sig_at_"+D.manager.id);
   let body;
@@ -516,7 +504,7 @@ function signals(){
   return head()+`<div class="card" style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
    <div><b>Player signals</b><div class="small muted">${STATIC?"Updated "+new Date(STATIC.built).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"})+(STATIC.trigger==="schedule"?" (scheduled)":""):last?"Last refreshed "+new Date(last).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"}):"Not refreshed yet"}</div></div>
    ${STATIC?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><a href="${esc(workflowUrl())}" target="_blank" rel="noopener"><button type="button">Refresh signals + advice</button></a><span class="small muted" style="max-width:300px">Opens GitHub: press <b>Run workflow</b>, wait about 2 minutes, then reload this page.</span></div>`
-   :`<div style="display:flex;gap:8px"><button id="sigbtn">Refresh signals</button><button class="ghost" id="reanalyse" title="Re-run the projections with the latest news">Refresh signals + advice</button></div>`}</div>${body}${extCard()}`;
+   :`<div style="display:flex;gap:8px"><button id="sigbtn">Refresh signals</button><button class="ghost" id="reanalyse" title="Re-run the projections with the latest news">Refresh signals + advice</button></div>`}</div>${body}`;
 }
 
 async function loadSignals(alsoAdvice){

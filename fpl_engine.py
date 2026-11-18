@@ -338,10 +338,8 @@ def fixture_points(r: PlayerRates, rules: Dict[str, Any], att_mult: float, lam_a
 
 class Projector:
     def __init__(self, bootstrap: Dict[str, Any], fx: FixtureIndex, horizon: List[int],
-                 recent: Optional[Dict[int, Dict[str, Any]]] = None, core: Optional[Dict[str, Any]] = None,
-                 ext_avail: Optional[Dict[int, float]] = None):
+                 recent: Optional[Dict[int, Dict[str, Any]]] = None, core: Optional[Dict[str, Any]] = None):
         self.fx = fx
-        self.ext_avail = ext_avail or {}
         self.recent = recent or {}
         self.total_players = max(_f(bootstrap.get("total_players"), 10_000_000), 1.0)
         self.core = core
@@ -368,8 +366,6 @@ class Projector:
         out: List[float] = []
         for k, ev in enumerate(self.horizon):
             av = availability(p, k)
-            if k == 0 and p["id"] in self.ext_avail:
-                av = min(av, self.ext_avail[p["id"]])  # a second source says they'll miss / may miss it
             total = 0.0
             for g in self.fx.get(team, ev):
                 if g["opp"] not in self.tm.A:
@@ -694,8 +690,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                  transfers: Optional[List[Dict[str, Any]]] = None,
                  notes: Optional[List[str]] = None,
                  recent: Optional[Dict[int, Dict[str, Any]]] = None,
-                 core: Optional[Dict[str, Any]] = None,
-                 ext_injuries: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 core: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     notes = list(notes or [])
     events = bootstrap.get("events") or []
     ev_by_id = {e["id"]: e for e in events}
@@ -727,14 +722,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             return f"{rs['starts']}/{rs['games']}"
         return f"{recent[pid]['starts']}/{recent[pid]['games']}" if pid in recent else None
 
-    ext = (ext_injuries or {}).get("by_player") or {}
-    ext_avail: Dict[int, float] = {}
-    for pid_e, info in ext.items():
-        el = elements.get(pid_e)
-        if not el or (el.get("status") or "a") != "a":
-            continue  # FPL already flags them; its own chance of playing is used
-        ext_avail[pid_e] = 0.25 if "missing" in str(info.get("type", "")).lower() else 0.6
-    proj = Projector(bootstrap, fx, horizon, recent, core, ext_avail)
+    proj = Projector(bootstrap, fx, horizon, recent, core)
     xpts = proj.xpts
     total_players = int(_f(bootstrap.get("total_players"), 10_000_000))
 
@@ -897,9 +885,6 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         if blanks:
             reasons.append(f"Blank in {blanks} of the next 4 GWs")
             severity += blanks
-        if i in ext and st == "a":
-            reasons.append(f"API-Football lists them as '{ext[i]['type']}' ({ext[i]['reason']}) for the next match, though FPL hasn't flagged them yet")
-            severity += 2.5 if "missing" in str(ext[i]["type"]).lower() else 1.0
         rec = recent.get(i)
         if rec and rec.get("games", 0) >= 3 and rec["starts"] <= rec["games"] - 2 and st == "a":
             reasons.append(f"Rotation risk: started {rec['starts']} of the last {rec['games']}")
@@ -944,7 +929,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     # Chips are judged over their whole window (up to 9 weeks ahead), so project further than usual.
     CHIP_LOOK = 9
     chip_h = list(range(next_gw, min(last_gw, next_gw + CHIP_LOOK - 1 + TRANSFER_HORIZON - 1) + 1))
-    lp = Projector(bootstrap, fx, chip_h, recent, core, ext_avail).xpts
+    lp = Projector(bootstrap, fx, chip_h, recent, core).xpts
     chip_weeks = chip_h[:CHIP_LOOK]
     mv_best = plan["best"]["moves"]
     after = list(squad)
@@ -1320,13 +1305,4 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         "players": players_tbl,
         "history": {"gws": hist_out, "totals": hist_tot},
         "price_watch": price_watch,
-        "external_injuries": {
-            "status": (ext_injuries or {}).get("status", "not configured"),
-            "error": (ext_injuries or {}).get("error"),
-            "players": sorted([{**{k: v for k, v in player_view(pid_e).items() if k in ("id", "name", "team", "pos", "price", "selected", "status", "chance", "news")},
-                                "type": info.get("type"), "reason": info.get("reason"), "date": info.get("date"),
-                                "mine": pid_e in squad, "fpl_flagged": (elements[pid_e].get("status") or "a") != "a"}
-                               for pid_e, info in ext.items() if pid_e in elements],
-                              key=lambda x: (not x["mine"], x["fpl_flagged"], -x["selected"])),
-        },
     }

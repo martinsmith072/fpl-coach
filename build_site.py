@@ -95,8 +95,6 @@ def main() -> int:
         index.append({"id": tid, "team_name": team["manager"]["team_name"], "manager": team["manager"]["manager"],
                       "overall_rank": team["manager"]["overall_rank"]})
         print(f"Built team {tid} ({team['manager']['team_name']}): GW{team['meta']['next_gw']}, {len(team['actions'])} actions.")
-        x = team.get("external_injuries") or {}
-        print(f"  API-Football: {x.get('status')}" + (f" ({x.get('error')})" if x.get("error") else f", {len(x.get('players') or [])} upcoming absences matched"))
 
     if not any("error" not in t for t in index):
         print("No teams could be built.", file=sys.stderr)

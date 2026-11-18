@@ -44,7 +44,6 @@ Open http://127.0.0.1:8765 and enter your team ID. That's the number in your FPL
 ## Data sources
 - **Official FPL API**: players, prices, fixtures, your team, injury flags.
 - **[FPL-Core-Insights](https://github.com/olbauday/FPL-Core-Insights)** by olbauday: match-by-match xG for every team and recent per-player xG, xA, shots, starts and defensive actions (updated twice daily). Used for fixture difficulty and recent underlying form.
-- **[API-Football](https://www.api-football.com/)** (optional): injuries and suspensions as a second opinion to FPL's flags. Add a free key as the GitHub secret `API_FOOTBALL_KEY`.
 
 ## How the projections work
 Expected points (xPts) for each player and fixture are built from:
