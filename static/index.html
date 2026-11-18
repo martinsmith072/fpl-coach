@@ -138,6 +138,22 @@ details summary{cursor:pointer;list-style:none}
 details summary::-webkit-details-marker{display:none}
 details summary::before{content:"▸ ";color:var(--muted)}details[open] summary::before{content:"▾ "}
 svg text{fill:var(--muted);font-size:11px}
+.tl{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(78px,1fr);gap:6px;overflow-x:auto;padding-bottom:4px}
+.tlw{min-height:86px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);padding:8px 6px;display:flex;flex-direction:column;gap:5px;align-items:center}
+.tlw.now{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.tlg{font:700 14px "Space Grotesk",Inter,sans-serif;text-align:center;line-height:1.1}
+.tlg small{display:block;font:600 10px Inter,sans-serif;color:var(--accent-text);text-transform:uppercase;letter-spacing:.08em}
+.tlc{font-size:11px;font-weight:700;padding:3px 7px;border-radius:7px;background:color-mix(in srgb,var(--cyan) 28%,transparent);text-align:center;width:100%}
+.tlc.play{background:var(--accent);color:var(--accent-ink)}.tlc.urgent{background:var(--warn);color:#1a1000}
+.chiptop{display:flex;gap:14px;align-items:center;margin-bottom:12px}
+.bestwk{flex:none;min-width:118px;border-radius:14px;padding:10px 12px;background:color-mix(in srgb,var(--cyan) 18%,var(--panel2));border:1px solid var(--line);text-align:center}
+.bestwk.play{background:var(--accent);color:var(--accent-ink)}.bestwk.play .k{color:var(--accent-ink);opacity:.75}
+.bestwk.urgent{background:var(--warn);color:#1a1000}
+.bestwk .k{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;font-weight:700;color:var(--muted)}
+.bestwk .v{font:700 20px "Space Grotesk",Inter,sans-serif;line-height:1.15}
+tr.rec td{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+tr.rec td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+@media (max-width:560px){.chiptop{flex-direction:column;align-items:stretch}}
 .hide{display:none!important}
 @media (max-width:560px){.pc{width:74px;padding:6px 3px}.pc .n{font-size:11px}.pc .o{font-size:10px}.stat .v{font-size:22px}header{padding:12px 16px}nav{padding:8px 12px}.card{padding:14px}}
 </style>
@@ -228,7 +244,7 @@ function actItem(a){
   return `<li class="t-${cls}"><span class="ic">${ic}</span><div>${lbl?`<b class="lbl">${lbl}</b>`:""}${esc(txt)}</div></li>`}
 function overview(){
   const caps=D.captaincy.map((p,i)=>`<tr><td>${i+1}. <b>${esc(p.name)}</b> <span class="muted small">${esc(p.team)}</span></td><td class="small">${esc(fxNext(p))}</td><td class="num"><b>${fmt(p.xpts_next)}</b></td><td class="num">${fmt(p.selected)}%</td><td class="small muted">${esc(p.eo_note)}</td></tr>`).join("");
-  const chips=D.chips.filter(c=>!["used","expired"].includes(c.status)).map(c=>`<div class="sig"><span class="pill ${c.status}">${esc(c.label)}</span> <span class="small">${esc(c.verdict)}</span></div>`).join("");
+  const chips=D.chips.filter(c=>!["used","expired"].includes(c.status)).map(c=>`<div class="sig"><span class="pill ${c.status}">${esc(c.label)}</span>${c.rec_label?` <b class="small">Best: ${esc(c.rec_label)}</b>`:""} <span class="small">${esc(c.verdict)}</span></div>`).join("");
   return head()+`<div class="grid g2">
   <div class="card"><h2>Your GW${D.meta.next_gw} game plan</h2><ul class="acts">${D.actions.map(actItem).join("")}</ul>
    <div class="note">${D.meta.notes.map(esc).join("<br>")}</div></div>
@@ -281,19 +297,24 @@ function transfers(){
   </div>`;
 }
 
+const CHIP_STATUS={play:"Play now",plan:"Planned",hold:"Hold",urgent:"Use soon",later:"Later",used:"Used",expired:"Expired",available:"Available"};
 function chips(){
+  const live=D.chips.filter(c=>c.values&&c.values.length);
+  const weeks=[...new Set(live.flatMap(c=>c.values.map(v=>v.gw)))].sort((a,b)=>a-b);
+  const plan=weeks.length?`<div class="card" style="margin-bottom:14px"><h2>Chip plan</h2>
+   <div class="tl">${weeks.map(g=>{const here=live.filter(c=>c.best_gw===g&&c.values.some(v=>v.rec));
+     return `<div class="tlw${g===D.meta.next_gw?" now":""}"><div class="tlg">GW${g}${g===D.meta.next_gw?"<small>now</small>":""}</div>${here.map(c=>`<span class="tlc ${c.status}">${esc(c.label)}</span>`).join("")}</div>`}).join("")}</div>
+   <div class="note">Each chip is placed in its recommended week, based on your fixtures and projections across its window. Cover chips aren't placed.${D.chips.filter(c=>c.status==="later").map(c=>` ${esc(c.label)} unlocks GW${c.window[0]}.`).join("")}</div></div>`:"";
   const rows=D.chips.map(c=>{
-    const max=Math.max(1,...c.values.map(v=>v.value));
-    const vals=c.values.length?`<table><tr><th>GW</th><th style="width:50%">Value</th><th class="num">Pts</th><th>Note</th></tr>${c.values.map(v=>`<tr><td>GW${v.gw}</td><td><div class="bar"><i style="width:${Math.max(0,v.value)/max*100}%"></i></div></td><td class="num">${fmt(v.value)}</td><td class="small muted">${esc(v.note)}</td></tr>`).join("")}</table>`:"";
-    const draft=c.draft?`<h3>Suggested ${esc(c.label)} squad</h3><div class="small">${c.draft.map(p=>`${p.pos} <b>${esc(p.name)}</b> (${esc(p.team)}, £${fmt(p.price)})`).join(" · ")}</div>`:"";
-    const also=(c.also||[]).map(a=>`<div class="small muted">GW${a.window[0]}–${a.window[1]}: ${esc(a.verdict)}</div>`).join("");
-    return `<div class="card"><h2>${esc(c.label)} <span class="pill ${c.status}">${esc(c.status)}</span> <span class="small muted">GW${c.window[0]}–${c.window[1]}</span></h2><p>${esc(c.verdict)}</p>${c.explain?`<p class="small muted">${esc(c.explain)}</p>`:""}${vals}${draft}${also}</div>`}).join("");
-  return head()+`<div class="card" style="margin-bottom:14px"><h2>How chips are judged</h2><div class="small">
-  <b>Bench Boost</b>: your bench's expected points; best in a double gameweek when all 15 have games.
-  <b>Triple Captain</b>: your captain's expected points; look for a premium with two good fixtures.
-  <b>Free Hit</b>: how much better a one-week dream team would do than your squad, compared with a normal week; ideal for blank weeks.
-  <b>Wildcard</b>: a permanent rebuild (unlimited free transfers for one week). It's valued over the ${D.meta.transfer_horizon} weeks after you play it, for each week you could play it, so you can see whether fixtures make waiting worthwhile.
-  Chips must be used within their window, so the app warns you when a window is closing.</div></div><div class="grid g2">${rows}</div>`;
+    const max=Math.max(1,...c.values.map(v=>Math.abs(v.value)));
+    const vals=c.values.length?`<div class="scroll"><table><tr><th>GW</th><th style="width:38%">Value</th><th class="num">Pts</th><th>Fixtures / notes</th></tr>${c.values.map(v=>`<tr class="${v.rec?"rec":""}"><td>GW${v.gw}${v.rec?' <span class="tag">best</span>':""}</td><td><div class="bar"><i style="width:${Math.max(0,v.value)/max*100}%"></i></div></td><td class="num">${v.value>0?"+":""}${fmt(v.value)}</td><td class="small muted">${esc(v.note)}</td></tr>`).join("")}</table></div>`:"";
+    const draft=c.draft?`<details style="margin-top:10px"><summary class="small"><b>Suggested ${esc(c.label)} squad</b></summary><div class="small" style="margin-top:6px">${c.draft.map(p=>`${p.pos} <b>${esc(p.name)}</b> (${esc(p.team)}, £${fmt(p.price)})`).join(" · ")}</div></details>`:"";
+    const also=(c.also||[]).map(a=>`<div class="small muted" style="margin-top:6px">GW${a.window[0]}–${a.window[1]}: ${esc(a.verdict)}</div>`).join("");
+    const best=c.rec_label?`<div class="bestwk ${c.status}"><div class="k">Best week</div><div class="v">${esc(c.rec_label)}</div>${c.best_value!=null&&!/cover/.test(c.rec_label)?`<div class="small">+${fmt(c.best_value)} pts</div>`:""}</div>`:"";
+    return `<div class="card"><h2>${esc(c.label)} <span class="pill ${c.status}">${CHIP_STATUS[c.status]||esc(c.status)}</span> <span class="small muted">window GW${c.window[0]}–${c.window[1]}</span></h2>
+     <div class="chiptop">${best}<p style="margin:0">${esc(c.verdict)}.</p></div>
+     ${vals}${c.explain?`<details style="margin-top:10px"><summary class="small muted">How this is worked out</summary><p class="small muted">${esc(c.explain)}</p></details>`:""}${draft}${also}</div>`}).join("");
+  return head()+plan+`<div class="grid g2">${rows}</div>`;
 }
 
 function fixtures(){

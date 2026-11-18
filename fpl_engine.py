@@ -777,16 +777,22 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     budget_total = squad_sell_value + bank
     wc_cache: Dict[str, Any] = {}
 
+    # Chips are judged over their whole window (up to 9 weeks ahead), so project further than usual.
+    CHIP_LOOK = 9
+    chip_h = list(range(next_gw, min(last_gw, next_gw + CHIP_LOOK - 1 + TRANSFER_HORIZON - 1) + 1))
+    lp = Projector(bootstrap, fx, chip_h, recent).xpts
+    chip_weeks = chip_h[:CHIP_LOOK]
+    mv_best = plan["best"]["moves"]
+    after = list(squad)
+    if mv_best:
+        after = [mv_best["in"][mv_best["outs"].index(i)] if i in mv_best["outs"] else i for i in squad]
+
+    def squad_fdr(sq: List[int], gws: Sequence[int]) -> Optional[float]:
+        f = [g["fdr"] for i in sq for w in gws for g in fx.get(elements[i]["team"], w) if g.get("fdr")]
+        return sum(f) / len(f) if f else None
+
     def wildcard_timing(stop: int) -> List[Tuple[int, float, str, List[int]]]:
         """Gain from a Wildcard played in each week of its window, versus your squad after this week's planned transfers."""
-        last_w = min(stop, next_gw + 8)
-        long_h = list(range(next_gw, min(last_gw, last_w + TRANSFER_HORIZON - 1) + 1))
-        lp = Projector(bootstrap, fx, long_h, recent).xpts
-        mv = plan["best"]["moves"]
-        after = list(squad)
-        if mv:
-            after = [mv["in"][mv["outs"].index(i)] if i in mv["outs"] else i for i in squad]
-
         def val(sq: List[int], s0: int, n: int) -> float:
             t = 0.0
             for k in range(n):
@@ -795,9 +801,11 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             return t
 
         out = []
-        for w in range(next_gw, last_w + 1):
+        for w in chip_weeks:
+            if w > stop:
+                break
             s0 = w - next_gw
-            n = min(TRANSFER_HORIZON, len(long_h) - s0)
+            n = min(TRANSFER_HORIZON, len(chip_h) - s0)
             if n < 3:
                 break
             score = {i: sum(WEIGHTS[k] * lp[i][s0 + k] for k in range(n)) for i in elements}
@@ -808,32 +816,46 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             gain = val(sq, s0, n) - val(base_sq, s0, n)
             if w == next_gw:  # this week you could make the planned transfers instead
                 gain -= max(0.0, plan["best"]["gain"] - plan["best"]["hits"])
-            fdrs = [g["fdr"] for i in after for k in range(n) for g in fx.get(elements[i]["team"], w + k) if g.get("fdr")]
-            note = f"your fixtures avg {sum(fdrs) / len(fdrs):.2f}" if fdrs else ""
-            out.append((w, gain, note, sq))
+            fd = squad_fdr(after, range(w, w + n))
+            out.append((w, gain, f"difficulty {fd:.2f} (next {n})" if fd else "", sq))
         return out
 
     def freehit_eval(k: int) -> Dict[str, Any]:
         key = f"fh{k}"
         if key not in wc_cache:
-            score = {i: xpts[i][k] for i in elements}
+            score = {i: lp[i][k] for i in elements}
             fh_pools = {pp: sorted([i for i in playable if pos[i] == pp], key=lambda i: score[i], reverse=True)[:30]
                         + [i for i in pools[pp] if elements[i]["now_cost"] <= 50][:6] for pp in (1, 2, 3, 4)}
             for pp in fh_pools:
                 fh_pools[pp] = list(dict.fromkeys(fh_pools[pp]))
             sq, val = build_squad(elements, pos, fh_pools, score, budget_total)
-            mine = best_xi(squad, pos, {i: xpts[i][k] for i in squad})
+            base_sq = after
+            mine = best_xi(base_sq, pos, {i: lp[i][k] for i in base_sq})
             wc_cache[key] = {"squad": sq, "gain": val - (mine["with_captain"] + 0.1 * mine["bench_total"])}
         return wc_cache[key]
 
     per_gw = []
-    for k, g in enumerate(horizon):
-        pts = {i: xpts[i][k] for i in squad}
-        r = best_xi(squad, pos, pts)
-        playing = sum(1 for i in squad if fx.get(elements[i]["team"], g))
-        doubles = sum(1 for i in squad if len(fx.get(elements[i]["team"], g)) > 1)
+    for k, g in enumerate(chip_weeks):
+        sq = after  # assume this week's recommended transfers are made
+        pts = {i: lp[i][k] for i in sq}
+        r = best_xi(sq, pos, pts)
+        playing = sum(1 for i in sq if fx.get(elements[i]["team"], g))
+        doubles = sum(1 for i in sq if len(fx.get(elements[i]["team"], g)) > 1)
+        cap_fx = ", ".join(f"{teams[f['opp']]['short_name']} ({'H' if f['home'] else 'A'})"
+                           for f in fx.get(elements[r["captain"]]["team"], g)) if r["captain"] else ""
         per_gw.append({"gw": g, "k": k, "xi": r, "bench": r["bench_total"], "cap": pts.get(r["captain"], 0.0) if r["captain"] else 0.0,
-                       "cap_id": r["captain"], "playing": playing, "doubles": doubles})
+                       "cap_id": r["captain"], "cap_fx": cap_fx, "playing": playing, "doubles": doubles,
+                       "fdr": squad_fdr(sq, [g])})
+
+    def ctx(x: Dict[str, Any]) -> str:
+        bits = []
+        if x["fdr"]:
+            bits.append(f"difficulty {x['fdr']:.2f}")
+        if x["doubles"]:
+            bits.append(f"{x['doubles']} doubles")
+        if x["playing"] < 15:
+            bits.append(f"{15 - x['playing']} blank")
+        return " · ".join(bits)
 
     for cdef in chip_defs:
         name = cdef.get("name")
@@ -850,7 +872,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             row.update(status="expired", verdict=f"Window ended GW{stop}", score=-1)
             chip_rows.append(row)
             continue
-        if start > horizon[-1]:
+        if start > chip_weeks[-1]:
             row.update(status="later", verdict=f"Available from GW{start}", score=-1)
             chip_rows.append(row)
             continue
@@ -859,75 +881,103 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             chip_rows.append(row)
             continue
         window = [x for x in per_gw if start <= x["gw"] <= stop]
+        sees_whole_window = bool(window) and window[-1]["gw"] >= stop
         if name == "bboost":
-            vals = [(x["gw"], x["bench"], f"{x['doubles']} doubles" if x["doubles"] else "") for x in window]
+            vals = [(x["gw"], x["bench"], ctx(x)) for x in window]
             threshold = 10.0
+            row["explain"] = "Bench Boost: your 4 substitutes score too, for one gameweek. Value = your bench's projected points that week. Best when everyone has a game, ideally a double."
         elif name == "3xc":
-            vals = [(x["gw"], x["cap"], f"{elements[x['cap_id']]['web_name']}" if x["cap_id"] else "") for x in window]
+            vals = [(x["gw"], x["cap"], f"{elements[x['cap_id']]['web_name']} v {x['cap_fx']}" if x["cap_id"] else "") for x in window]
             threshold = 9.0
+            row["explain"] = "Triple Captain: your captain scores triple instead of double, for one gameweek. Value = the extra points from your best captain that week. Best with a premium player in a double gameweek or a very easy fixture."
         elif name == "freehit":
             raw = [(x, freehit_eval(x["k"])["gain"]) for x in window]
             gains = sorted(g for _, g in raw)
             typical = gains[len(gains) // 2] if gains else 0.0
-            # Value = how much better than a normal week a Free Hit would be (blanks and doubles stand out).
-            vals = [(x["gw"], g - typical + (6.0 if x["playing"] <= 9 else 0.0),
-                     f"{x['playing']}/15 have a fixture" + (f", {x['doubles']} doubles" if x["doubles"] else "")) for x, g in raw]
+            vals = [(x["gw"], g - typical + (6.0 if x["playing"] <= 9 else 0.0), ctx(x)) for x, g in raw]
             threshold = 10.0
+            row["explain"] = ("Free Hit: unlimited transfers for one gameweek, then your squad reverts. Value = how much better a one-week "
+                              "dream team would do than your squad, compared with a normal week. It shines in blank gameweeks, when many of your players don't play.")
         else:  # wildcard
             timing = wildcard_timing(stop) if start <= next_gw <= stop else []
             vals = [(w, g, n) for w, g, n, _ in timing]
             threshold = 20.0
             if timing:
                 row["draft"] = [player_view(i) for i in sorted(timing[0][3], key=lambda i: (pos[i], -hsum5[i]))]
-            row["explain"] = ("A Wildcard gives unlimited free transfers for one gameweek, and the new squad is permanent. "
-                              "Unlike Free Hit, your squad doesn't revert. Each week shows how much better a rebuild would do "
-                              f"over the {TRANSFER_HORIZON} GWs from that week than your squad would (this week: after your planned "
-                              "free transfers). The model is optimistic about its own picks, so treat the gain as an upper bound.")
-        row["values"] = [{"gw": g, "value": _r(v, 1), "note": n} for g, v, n in vals]
+            row["explain"] = ("Wildcard: unlimited free transfers for one gameweek, and the new squad is permanent. "
+                              f"Value = how much better a rebuild would do over the {TRANSFER_HORIZON} GWs from that week than your squad "
+                              "(this week: after your planned free transfers). Waiting costs you the improvement in the weeks in between. "
+                              "The model is optimistic about its own picks, so treat the gain as an upper bound.")
         weeks_left = stop - next_gw + 1
         if not vals:
             row.update(status="available", verdict="Hold", score=0)
+            chip_rows.append(row)
+            continue
+        best_gw, best_val, _ = max(vals, key=lambda v: v[1])
+        if name in ("bboost", "3xc"):
+            # Prefer an earlier week when it is almost as good: less risk of injuries or the window closing.
+            best_gw, best_val, _ = next(v for v in vals if v[1] >= best_val - 0.5)
+        now_val = vals[0][1] if vals[0][0] == next_gw else 0.0
+        if name == "wildcard":
+            problems = sum(1 for s in sell_list if s["severity"] >= 3)
+            per_week = max(now_val, 0.0) / TRANSFER_HORIZON
+            eff = [(g, v - (g - next_gw) * per_week) for g, v, _ in vals]  # waiting forfeits the in-between weeks
+            rec_gw = max(eff, key=lambda e: e[1])[0]
+            rec_val = dict((g, v) for g, v, _ in vals)[rec_gw]
+            later_best = max(((g, v) for g, v, _ in vals if g > next_gw), key=lambda e: e[1], default=(None, 0.0))
+            if rec_gw != next_gw and rec_val >= threshold:
+                status = "plan"
+                verdict = f"Your fixtures swing: a rebuild in GW{rec_gw} projects +{rec_val:.1f} (vs +{now_val:.1f} now), enough to justify waiting"
+            elif now_val >= threshold or problems >= 4:
+                status = "play"
+                swing = ("no fixture swing worth waiting for" if later_best[0] is None or later_best[1] - now_val < 5
+                         else f"GW{later_best[0]} is slightly better (+{later_best[1]:.1f}) but not by enough to wait")
+                verdict = (f"A rebuild projects +{now_val:.1f} pts more than your free transfers over {TRANSFER_HORIZON} GWs, and {swing}. "
+                           f"Each week you wait costs about {per_week:.0f} pts")
+            elif weeks_left <= 3:
+                status = "urgent"
+                verdict = f"Use it or lose it: the window closes after GW{stop}"
+            else:
+                status = "hold"
+                rec_gw = best_gw
+                verdict = (f"Optional. A rebuild only beats your free transfers by {best_val:+.1f}; it's worth it from about +{threshold:.0f}. "
+                           f"Keep it for injuries or a bad run, and use it by GW{stop}")
         else:
-            best_gw, best_val, _ = max(vals, key=lambda v: v[1])
-            now_val = vals[0][1] if vals[0][0] == next_gw else 0.0
-            row["best_gw"] = best_gw
-            row["best_value"] = _r(best_val, 1)
-            if name == "wildcard":
-                problems = sum(1 for s in sell_list if s["severity"] >= 3)
-                per_week = max(now_val, 0.0) / TRANSFER_HORIZON
-                # Waiting costs roughly one week of improvement per week of delay.
-                eff = [(g, v - (g - next_gw) * per_week) for g, v, _ in vals]
-                best_eff_gw, best_eff = max(eff, key=lambda e: e[1])
-                later_best = max(((g, v) for g, v, _ in vals if g > next_gw), key=lambda e: e[1], default=(None, 0.0))
-                if best_eff_gw != next_gw and best_val >= threshold:
-                    verdict = (f"Wait for GW{best_eff_gw}: your fixtures turn and a rebuild then projects +{dict((g, v) for g, v, _ in vals)[best_eff_gw]:.1f} "
-                               f"(vs +{now_val:.1f} now)")
-                    status = "plan"
-                elif now_val >= threshold or problems >= 4:
-                    swing = ("No fixture swing worth waiting for" if later_best[0] is None or later_best[1] - now_val < 5
-                             else f"GW{later_best[0]} is slightly better (+{later_best[1]:.1f}) but not enough to justify waiting")
-                    verdict = (f"Worth considering now: a rebuild projects +{now_val:.1f} pts more than your free transfers over {TRANSFER_HORIZON} GWs. "
-                               f"{swing}. Each week you wait costs about {per_week:.0f} pts")
+            rec_gw = best_gw
+            any_blank_or_double = any(x["playing"] < 15 or x["doubles"] for x in window)
+            if name == "freehit" and best_val < threshold and not any_blank_or_double:
+                status = "hold"
+                verdict = (f"No blank or double gameweeks before GW{min(stop, window[-1]['gw'])}, so there's no ideal Free Hit week. "
+                           f"Keep it as emergency cover in case injuries or suspensions pile up. If it's still unused, the best week is GW{best_gw}")
+            elif sees_whole_window:
+                # Unused chips are wasted when the window closes, so always name the best remaining week.
+                if best_gw == next_gw:
                     status = "play"
-                elif weeks_left <= 3:
-                    verdict = f"Use it or lose it: the window closes after GW{stop}. Gain now: +{best_val:.1f}"
-                    status = "urgent"
+                    verdict = f"This is your best week left before the chip expires after GW{stop} (+{best_val:.1f} pts)"
                 else:
-                    verdict = f"Hold. A rebuild only beats your free transfers by {best_val:+.1f} pts; aim for at least ~{threshold:.0f}"
-                    status = "hold"
+                    status = "plan"
+                    strength = "a strong week" if best_val >= threshold else "the best of an average bunch, as no double gameweeks are scheduled yet"
+                    verdict = f"Hold until GW{best_gw} (+{best_val:.1f} pts): {strength}. Expires after GW{stop}"
             else:
                 if best_gw == next_gw and best_val >= threshold:
-                    verdict, status = f"Play this GW (+{best_val:.1f} pts expected)", "play"
-                elif weeks_left <= 3:
-                    verdict, status = f"Window closes after GW{stop}. Best remaining week is GW{best_gw} (+{best_val:.1f})", "urgent"
+                    status, verdict = "play", f"Play this GW (+{best_val:.1f} pts expected)"
                 elif best_val >= threshold:
-                    verdict, status = f"Plan for GW{best_gw} (+{best_val:.1f} pts). Hold until then", "plan"
+                    status, verdict = "plan", f"Plan for GW{best_gw} (+{best_val:.1f} pts)"
                 else:
-                    verdict, status = (f"Hold. Best spot in view is GW{best_gw} (+{best_val:.1f}). "
-                                       f"Save it for a double gameweek or a stronger week"), "hold"
-                if name == "freehit" and now_val >= threshold:
-                    row["draft"] = [player_view(i) for i in sorted(freehit_eval(0)["squad"], key=lambda i: (pos[i], -xpts[i][0]))]
-            row.update(status=status, verdict=verdict, score=best_val / threshold)
+                    status, verdict = "hold", (f"Best week in view is GW{best_gw} (+{best_val:.1f}), but nothing stands out. "
+                                               f"Double gameweeks are usually announced later, so keep it for one")
+            if name == "bboost":
+                dead = [elements[i]["web_name"] for i in after if i not in per_gw[0]["xi"]["xi"]
+                        and (elements[i].get("status") in ("u", "n", "i", "s"))]
+                if dead:
+                    verdict += f". Note: {', '.join(dead)} would score 0 on your bench; a playing backup adds about 3–4 pts"
+            if name == "freehit" and rec_gw == next_gw and now_val >= threshold:
+                row["draft"] = [player_view(i) for i in sorted(freehit_eval(0)["squad"], key=lambda i: (pos[i], -lp[i][0]))]
+        cover = name == "freehit" and status == "hold" and "emergency cover" in verdict
+        row["values"] = [{"gw": g, "value": _r(v, 1), "note": n, "rec": g == rec_gw and not cover} for g, v, n in vals]
+        row.update(status=status, verdict=verdict, score=best_val / threshold, best_gw=rec_gw,
+                   best_value=_r(dict((g, v) for g, v, _ in vals)[rec_gw], 1),
+                   rec_label=(f"Emergency cover · use by GW{stop}" if cover else f"GW{rec_gw}" + (" (this week)" if rec_gw == next_gw else "")))
         chip_rows.append(row)
 
     # Collapse chip rows: keep the one that matters now for each chip type.
