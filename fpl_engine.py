@@ -696,12 +696,23 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     opts = transfer_options(squad, elements, pos, xpts, sell, bank, pools, locked=fodder)
     plan = pick_plan(opts, ft)
 
+    def mv_player(i: int, price: int) -> Dict[str, Any]:
+        p = elements[i]
+        n = TRANSFER_HORIZON
+        cells = fixtures_for(p["team"], horizon[:n])
+        fd = [f["fdr"] for c in cells for f in c if f.get("fdr")]
+        return {"id": i, "name": p["web_name"], "price": _price(price), "team": teams[p["team"]]["short_name"],
+                "pos": POS[p["element_type"]], "xpts_h": _r(sum(xpts[i][:n])), "xpts": [_r(x) for x in xpts[i][:n]],
+                "fixtures": cells, "avg_fdr": _r(sum(fd) / len(fd), 2) if fd else None, "form": _f(p.get("form")),
+                "status": p.get("status") or "a", "chance": p.get("chance_of_playing_next_round"), "news": p.get("news") or "",
+                "selected": _f(p.get("selected_by_percent")),
+                "recent_starts": (f"{recent[i]['starts']}/{recent[i]['games']}" if i in recent else None)}
+
     def move_view(m: Dict[str, Any]) -> Dict[str, Any]:
         return {
-            "out": [{"id": i, "name": elements[i]["web_name"], "price": _price(sell[i]), "team": teams[elements[i]["team"]]["short_name"],
-                     "xpts_h": _r(sum(xpts[i][:TRANSFER_HORIZON]))} for i in m["outs"]],
-            "in": [{"id": i, "name": elements[i]["web_name"], "price": _price(elements[i]["now_cost"]), "team": teams[elements[i]["team"]]["short_name"],
-                    "xpts_h": _r(sum(xpts[i][:TRANSFER_HORIZON]))} for i in m["in"]],
+            "out": [mv_player(i, sell[i]) for i in m["outs"]],
+            "in": [mv_player(i, elements[i]["now_cost"]) for i in m["in"]],
+            "gws": horizon[:TRANSFER_HORIZON],
             "gain": _r(m["gain"], 1),
             "bank_after": _price(m["bank_after"]),
         }

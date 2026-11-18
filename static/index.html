@@ -160,6 +160,22 @@ tr.rec td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
 .switch button:hover{box-shadow:none;color:var(--ink)}
 .switch button.on{background:var(--accent);color:var(--accent-ink)}
 code{background:var(--panel2);padding:1px 5px;border-radius:5px;font-size:12.5px}
+.mvx-wrap{display:block}
+.mvs{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;cursor:pointer;list-style:none}
+.mvs::-webkit-details-marker{display:none}
+details.mv summary::before{content:none}
+.mvfoot{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mvmore{color:var(--accent-text);font-weight:700;font-size:12px;white-space:nowrap}
+.mvmore::after{content:" ▾"}
+details[open] .mvmore::after{content:" ▴"}
+details.mv[open]{border-color:var(--accent)}
+.mvd{margin-top:10px;padding-top:6px;border-top:1px dashed var(--line)}
+.mvd table th,.mvd table td{padding:6px 5px}
+.mvc{text-align:center;white-space:nowrap}
+.mvc .fdr{min-width:40px;font-size:11px}
+.mvx{font:700 13px "Space Grotesk",Inter,sans-serif;margin-top:3px}
+.mvn{min-width:150px}
+tr.mvdiff td{border-top:2px solid var(--line)}
 .hide{display:none!important}
 @media (max-width:560px){.stat .spark{display:none}.pc{width:74px;padding:6px 3px}.pc .n{font-size:11px}.pc .o{font-size:10px}.stat .v{font-size:22px}header{padding:12px 16px}nav{padding:8px 12px}.card{padding:14px}}
 </style>
@@ -281,9 +297,24 @@ function team(){
   <div class="note">“Sell” is your estimated selling price: you keep half of any price rise.</div></div></div>`;
 }
 
-function mv(m){return `<div class="mv"><span class="out">− ${m.out.map(o=>`${esc(o.name)} <span class="muted small">£${fmt(o.price)}</span>`).join(", ")}</span><span>→</span>
+function mvRow(o,side,gws){
+  const cells=gws.map((g,k)=>{const c=(o.fixtures||[])[k]||[];const x=(o.xpts||[])[k];
+    return `<td class="mvc">${c.length?c.map(f=>`<span class="fdr fdr${f.fdr||3}">${esc(f.opp)}${f.home?"":" (a)"}</span>`).join(""):`<span class="fdr blank">–</span>`}<div class="mvx">${x==null?"–":fmt(x)}</div></td>`}).join("");
+  const st=o.status&&o.status!=="a"?` <span class="pill ${o.chance!=null&&o.chance>25?"warn":"bad"}" title="${esc(o.news)}">${o.chance??0}%</span>`:"";
+  return `<tr class="${side}"><td class="mvn"><span class="${side}">${side==="out"?"−":"+"} ${esc(o.name)}</span>${st}<div class="small muted">${esc(o.team)} · ${o.pos||""} · £${fmt(o.price)} · form ${fmt(o.form)}${o.recent_starts?` · started ${o.recent_starts}`:""}</div></td>${cells}
+   <td class="num"><b>${fmt(o.xpts_h)}</b><div class="small muted">diff ${o.avg_fdr==null?"–":fmt(o.avg_fdr,1)}</div></td></tr>`}
+function mv(m){
+  const gws=m.gws||[];const has=gws.length&&(m.out[0]||{}).xpts;
+  const sum=(arr,k)=>arr.reduce((s,o)=>s+((o.xpts||[])[k]||0),0);
+  const diff=gws.map((g,k)=>sum(m.in,k)-sum(m.out,k));
+  const detail=has?`<div class="mvd scroll"><table><tr><th>Player</th>${gws.map(g=>`<th class="mvc">GW${g}</th>`).join("")}<th class="num">${gws.length}GW</th></tr>
+   ${m.out.map(o=>mvRow(o,"out",gws)).join("")}${m.in.map(o=>mvRow(o,"in",gws)).join("")}
+   <tr class="mvdiff"><td><b>Difference</b><div class="small muted">raw xPts, in minus out</div></td>${diff.map(d=>`<td class="mvc" style="color:${d>0.05?"var(--good)":d<-0.05?"var(--bad)":"inherit"}"><b>${d>=0?"+":""}${fmt(d)}</b></td>`).join("")}<td class="num"><b>${(()=>{const t=diff.reduce((a,b)=>a+b,0);return (t>=0?"+":"")+fmt(t)})()}</b></td></tr></table>
+   <div class="note">Colours show fixture difficulty (green = easy, red = hard), with xPts underneath. “Diff” is average difficulty from 1 to 5. The headline gain also counts captaincy and who'd actually start in your XI, so it can differ from the raw difference.</div></div>`:"";
+  const head=`<span class="out">− ${m.out.map(o=>`${esc(o.name)} <span class="muted small">£${fmt(o.price)}</span>`).join(", ")}</span><span>→</span>
  <span class="in">+ ${m.in.map(o=>`${esc(o.name)} <span class="muted small">${esc(o.team)} £${fmt(o.price)}</span>`).join(", ")}</span>
- <span class="gain">+${fmt(m.gain)}</span><span class="small muted" style="width:100%">Bank after: £${fmt(m.bank_after)}m</span></div>`}
+ <span class="gain">+${fmt(m.gain)}</span><span class="small muted mvfoot">Bank after: £${fmt(m.bank_after)}m${has?'<span class="mvmore">Fixtures &amp; xPts</span>':""}</span>`;
+  return has?`<details class="mv mvx-wrap"><summary class="mvs">${head}</summary>${detail}</details>`:`<div class="mv">${head}</div>`}
 
 function transfers(){
   const T=D.transfers,P=T.plan;
