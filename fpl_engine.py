@@ -136,11 +136,22 @@ class FixtureIndex:
 class TeamModel:
     """Attack strength and defensive weakness per team and venue (1.0 = league average)."""
 
-    def __init__(self, teams: Sequence[Dict[str, Any]], fx: FixtureIndex):
+    def __init__(self, teams: Sequence[Dict[str, Any]], fx: FixtureIndex,
+                 elements: Optional[Sequence[Dict[str, Any]]] = None):
         total_goals = sum(fx.goals_for.values())
         total_games = sum(fx.games_played.values())
         mu = total_goals / total_games if total_games >= 20 else 1.4
         self.mu = _clip(mu, 1.0, 1.9)
+
+        # Expected goals for and against each team this season. xG is a steadier guide to
+        # strength than actual goals, which swing on luck.
+        xgf: Dict[int, float] = defaultdict(float)
+        keeper: Dict[int, Tuple[float, float]] = {}
+        for p in elements or []:
+            xgf[p["team"]] += _f(p.get("expected_goals"))
+            if p.get("element_type") == 1 and _f(p.get("minutes")) > keeper.get(p["team"], (0.0, 0.0))[0]:
+                keeper[p["team"]] = (_f(p.get("minutes")), _f(p.get("expected_goals_conceded")))
+        have_xg = bool(elements) and sum(xgf.values()) > 0
 
         def mean(keys: Sequence[str]) -> float:
             vals = [_f(t.get(k)) for t in teams for k in keys if _f(t.get(k)) > 0]
@@ -148,21 +159,27 @@ class TeamModel:
 
         att_mean = mean(["strength_attack_home", "strength_attack_away"])
         def_mean = mean(["strength_defence_home", "strength_defence_away"])
-        k = 8.0
+        k = 4.0  # light shrinkage towards average: real differences between teams are large
         self.A: Dict[int, Dict[str, float]] = {}
         self.D: Dict[int, Dict[str, float]] = {}
         for t in teams:
             tid = t["id"]
             gp = fx.games_played[tid]
-            att_res = ((fx.goals_for[tid] + self.mu * k) / (gp + k)) / self.mu
-            dw_res = ((fx.goals_against[tid] + self.mu * k) / (gp + k)) / self.mu
-            w_res = _clip(gp / (gp + 10.0), 0.0, 0.6)
+            gf, ga = float(fx.goals_for[tid]), float(fx.goals_against[tid])
+            if have_xg and gp:
+                gk_min, gk_xgc = keeper.get(tid, (0.0, 0.0))
+                xga = gk_xgc * (gp * 90.0 / gk_min) if gk_min >= 90 else ga
+                gf = 0.35 * gf + 0.65 * xgf[tid]
+                ga = 0.35 * ga + 0.65 * xga
+            att_res = ((gf + self.mu * k) / (gp + k)) / self.mu
+            dw_res = ((ga + self.mu * k) / (gp + k)) / self.mu
+            w_res = _clip(gp / (gp + 4.0), 0.0, 0.85)
             self.A[tid], self.D[tid] = {}, {}
             for venue, hf in (("home", 1.08), ("away", 0.92)):
                 sa = _f(t.get(f"strength_attack_{venue}")) or att_mean
                 sd = _f(t.get(f"strength_defence_{venue}")) or def_mean
-                s_att = (sa / att_mean) ** 2
-                s_def = (def_mean / sd) ** 2
+                s_att = (sa / att_mean) ** 3
+                s_def = (def_mean / sd) ** 3
                 self.A[tid][venue] = w_res * att_res * hf + (1 - w_res) * s_att
                 self.D[tid][venue] = w_res * dw_res * (2 - hf) + (1 - w_res) * s_def
 
@@ -267,7 +284,7 @@ class Projector:
         self.fx = fx
         self.recent = recent or {}
         self.total_players = max(_f(bootstrap.get("total_players"), 10_000_000), 1.0)
-        self.tm = TeamModel(bootstrap.get("teams") or [], fx)
+        self.tm = TeamModel(bootstrap.get("teams") or [], fx, bootstrap.get("elements") or [])
         self.rules = scoring_rules(bootstrap)
         self.horizon = horizon
         self.xpts: Dict[int, List[float]] = {}
