@@ -31,6 +31,8 @@ TRANSFER_HORIZON = 5  # gameweeks used to judge a transfer
 HIT_COST = 4
 ROLL_VALUE = 1.5  # rough value of banking a free transfer
 FODDER_GK_MAX = 45  # £4.5m: a backup keeper this cheap is assumed to be bench fodder
+WC_LOYALTY = 2.5  # a Wildcard only swaps a player you own if the new one is ~2.5 pts better over 5 GWs
+QUALITY_PER_M = 0.25  # tie-break towards proven (pricier) players when projections are close
 
 CHIP_LABELS = {
     "wildcard": "Wildcard",
@@ -45,6 +47,27 @@ PRIOR_XG = {1: 0.0, 2: 0.04, 3: 0.11, 4: 0.30}
 PRIOR_XA = {1: 0.01, 2: 0.06, 3: 0.12, 4: 0.10}
 PRIOR_BONUS = {1: 0.20, 2: 0.20, 3: 0.25, 4: 0.30}
 DEFCON_THRESHOLD = {2: 10.0, 3: 12.0, 4: 12.0}
+
+
+def price_prior_xg(pos: int, price: float) -> float:
+    """Typical xG per 90 for a player of this position and price."""
+    if pos == 1:
+        return 0.0
+    if pos == 2:
+        return _clip(0.04 + 0.015 * (price - 4.5), 0.02, 0.15)
+    if pos == 3:
+        return _clip(0.08 + 0.045 * (price - 5.0), 0.04, 0.55)
+    return _clip(0.25 + 0.05 * (price - 5.5), 0.15, 0.80)
+
+
+def price_prior_xa(pos: int, price: float) -> float:
+    if pos == 1:
+        return 0.01
+    if pos == 2:
+        return _clip(0.05 + 0.02 * (price - 4.5), 0.03, 0.25)
+    if pos == 3:
+        return _clip(0.08 + 0.025 * (price - 5.0), 0.05, 0.35)
+    return _clip(0.07 + 0.015 * (price - 5.5), 0.04, 0.25)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -222,9 +245,12 @@ class PlayerRates:
             st = _f(starts) if starts is not None else mins / 85.0
             self.mps = _clip(mins / st, 55.0, 90.0) if st > 0 else 70.0
         self.sub_rate = min(1 - self.start_rate, 0.3) if mins > 0 else 0.0
-        w = 4.0
-        self.xg90 = (_f(p.get("expected_goals")) + PRIOR_XG[self.pos] * w) / (n90 + w)
-        self.xa90 = (_f(p.get("expected_assists")) + PRIOR_XA[self.pos] * w) / (n90 + w)
+        # Pull small samples towards what the player's price suggests: FPL prices reflect
+        # long-run quality, so a cheap player on a hot streak is treated with some caution.
+        price = _f(p.get("now_cost")) / 10.0
+        w = 6.0
+        self.xg90 = (_f(p.get("expected_goals")) + price_prior_xg(self.pos, price) * w) / (n90 + w)
+        self.xa90 = (_f(p.get("expected_assists")) + price_prior_xa(self.pos, price) * w) / (n90 + w)
         self.bonus90 = (_f(p.get("bonus")) + PRIOR_BONUS[self.pos] * w) / (n90 + w)
         self.saves90 = (_f(p.get("saves")) + 3.0 * w) / (n90 + w) if self.pos == 1 else 0.0
         self.yc90 = _f(p.get("yellow_cards")) / n90 if n90 >= 3 else 0.12
@@ -518,18 +544,37 @@ def pick_plan(opts: Dict[str, Any], ft: int) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- squad builder (Wildcard / Free Hit)
 
 def build_squad(elements: Dict[int, Dict[str, Any]], pos: Dict[int, int], pools: Dict[int, List[int]],
-                score: Dict[int, float], budget: int) -> Tuple[List[int], float]:
-    """Greedy best 15 for a budget: take the best, then make the cheapest downgrades, then upgrade with spare money."""
-    pts = score
+                score: Dict[int, float], budget: int, owned: Optional[set] = None, sell: Optional[Dict[int, int]] = None,
+                loyalty: float = 0.0, keep_gk: Optional[int] = None) -> Tuple[List[int], float]:
+    """Best 15 for a budget, built the way a sensible manager would:
+    spend on the starting XI, fill the bench with cheap players (a cheap backup keeper), use the
+    money, count selling prices for players you own, and keep owned players unless clearly beaten."""
+    owned = owned or set()
+    sell = sell or {}
+    pts = {i: v + QUALITY_PER_M * elements[i]["now_cost"] / 10.0 for i, v in score.items()}
+    for i in owned:
+        if i in pts:
+            pts[i] += loyalty  # a replacement has to beat an owned player by a margin
+
+    def price(i: int) -> int:
+        return sell.get(i, elements[i]["now_cost"]) if i in owned else elements[i]["now_cost"]
 
     def value(sq: List[int]) -> float:
         r = best_xi(sq, pos, pts)
-        return r["with_captain"] + 0.1 * r["bench_total"]
+        return r["with_captain"] + 0.03 * r["bench_total"]
+
+    def cost(sq: List[int]) -> int:
+        return sum(price(i) for i in sq)
+
+    def clubs_ok(sq: List[int]) -> bool:
+        return max(Counter(elements[i]["team"] for i in sq).values()) <= MAX_PER_CLUB
+
+    cand = {pp: list(dict.fromkeys(pools[pp] + [i for i in owned if pos.get(i) == pp])) for pp in (1, 2, 3, 4)}
 
     squad: List[int] = []
     clubs: Counter = Counter()
     for p_id in (1, 2, 3, 4):
-        for c in sorted(pools[p_id], key=lambda i: pts.get(i, 0.0), reverse=True):
+        for c in sorted(cand[p_id], key=lambda i: pts.get(i, 0.0), reverse=True):
             if sum(1 for i in squad if pos[i] == p_id) >= SQUAD_COUNT[p_id]:
                 break
             if clubs[elements[c]["team"]] >= MAX_PER_CLUB:
@@ -537,51 +582,71 @@ def build_squad(elements: Dict[int, Dict[str, Any]], pos: Dict[int, int], pools:
             squad.append(c)
             clubs[elements[c]["team"]] += 1
 
-    def cost(sq: List[int]) -> int:
-        return sum(elements[i]["now_cost"] for i in sq)
+    def swap(sq: List[int], out: int, inn: int) -> List[int]:
+        return [inn if i == out else i for i in sq]
 
-    for _ in range(40):
+    def fodder_bench(sq: List[int]) -> List[int]:
+        """Replace bench players with the cheapest sensible options, freeing money for the XI."""
+        xi = set(best_xi(sq, pos, pts)["xi"])
+        for b in [i for i in sq if i not in xi]:
+            if pos[b] == 1 and keep_gk and keep_gk not in sq:
+                new = swap(sq, b, keep_gk)
+                if clubs_ok(new):
+                    sq = new
+                    continue
+            if price(b) <= FODDER_GK_MAX and pos[b] == 1:
+                continue
+            cheap = sorted([c for c in cand[pos[b]] if c not in sq and price(c) < price(b)],
+                           key=lambda c: (price(c), -pts.get(c, 0.0)))
+            for c in cheap[:6]:
+                new = swap(sq, b, c)
+                if clubs_ok(new) and set(best_xi(new, pos, pts)["xi"]) == xi:
+                    sq = new
+                    break
+        return sq
+
+    for _ in range(40):  # 1) get under budget with the least damage
         over = cost(squad) - budget
         if over <= 0:
             break
         cur = value(squad)
         best_move = None
         for out in squad:
-            clubs = Counter(elements[i]["team"] for i in squad if i != out)
-            for c in pools[pos[out]]:
-                if c in squad or elements[c]["now_cost"] >= elements[out]["now_cost"]:
+            for c in cand[pos[out]]:
+                if c in squad or price(c) >= price(out):
                     continue
-                if clubs[elements[c]["team"]] >= MAX_PER_CLUB:
+                new = swap(squad, out, c)
+                if not clubs_ok(new):
                     continue
-                saved = elements[out]["now_cost"] - elements[c]["now_cost"]
-                new = [c if i == out else i for i in squad]
-                loss = cur - value(new)
-                ratio = loss / min(saved, over)
+                ratio = (cur - value(new)) / min(price(out) - price(c), over)
                 if best_move is None or ratio < best_move[0]:
                     best_move = (ratio, new)
         if best_move is None:
             break
         squad = best_move[1]
 
-    for _ in range(25):
+    squad = fodder_bench(squad)  # 2) cheap bench
+
+    for _ in range(40):  # 3) spend what's left on the XI
         spare = budget - cost(squad)
         cur = value(squad)
         best_move = None
         for out in squad:
-            clubs = Counter(elements[i]["team"] for i in squad if i != out)
-            for c in pools[pos[out]]:
-                if c in squad or elements[c]["now_cost"] - elements[out]["now_cost"] > spare:
+            for c in cand[pos[out]]:
+                if c in squad or price(c) - price(out) > spare:
                     continue
-                if clubs[elements[c]["team"]] >= MAX_PER_CLUB:
+                new = swap(squad, out, c)
+                if not clubs_ok(new):
                     continue
-                new = [c if i == out else i for i in squad]
                 gain = value(new) - cur
                 if gain > 0.05 and (best_move is None or gain > best_move[0]):
                     best_move = (gain, new)
         if best_move is None:
             break
         squad = best_move[1]
-    return squad, value(squad)
+    squad = fodder_bench(squad)
+    raw = best_xi(squad, pos, score)
+    return squad, raw["with_captain"] + 0.03 * raw["bench_total"]
 
 
 # --------------------------------------------------------------------------- main entry point
@@ -692,15 +757,19 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
 
     # ---- candidate pools per position
     playable = [i for i, p in elements.items() if (p.get("status") or "a") not in ("u", "n")]
+    # Only suggest buying players likely to play: available, or flagged at 75% or better.
+    buyable = [i for i in playable if (elements[i].get("status") or "a") == "a"
+               or _f(elements[i].get("chance_of_playing_next_round"), 0) >= 75]
     hsum5 = {i: sum(WEIGHTS[k] * v for k, v in enumerate(xpts[i][:TRANSFER_HORIZON])) for i in elements}
     pools: Dict[int, List[int]] = {}
     for pid_pos in (1, 2, 3, 4):
-        cands = [i for i in playable if pos[i] == pid_pos]
+        cands = [i for i in buyable if pos[i] == pid_pos]
         by_score = sorted(cands, key=lambda i: hsum5[i], reverse=True)[:45]
         by_value = sorted(cands, key=lambda i: hsum5[i] / max(elements[i]["now_cost"], 35), reverse=True)[:20]
         cheap = sorted([i for i in cands if hsum5[i] > 0.5], key=lambda i: (elements[i]["now_cost"], -hsum5[i]))[:6]
+        premium = sorted(cands, key=lambda i: elements[i]["now_cost"], reverse=True)[:8]
         seen_ids: List[int] = []
-        for i in by_score + by_value + cheap:
+        for i in by_score + by_value + cheap + premium:
             if i not in seen_ids:
                 seen_ids.append(i)
         pools[pid_pos] = sorted(seen_ids, key=lambda i: hsum5[i], reverse=True)
@@ -837,10 +906,13 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             if n < 3:
                 break
             score = {i: sum(WEIGHTS[k] * lp[i][s0 + k] for k in range(n)) for i in elements}
-            wc_pools = {pp: list(dict.fromkeys(sorted([i for i in playable if pos[i] == pp], key=lambda i: score[i], reverse=True)[:40]
-                                               + [i for i in pools[pp] if elements[i]["now_cost"] <= 50][:6])) for pp in (1, 2, 3, 4)}
-            sq, _ = build_squad(elements, pos, wc_pools, score, budget_total)
             base_sq = squad if w == next_gw else after
+            wc_pools = {pp: list(dict.fromkeys(sorted([i for i in buyable if pos[i] == pp], key=lambda i: score[i], reverse=True)[:40]
+                                               + [i for i in pools[pp] if elements[i]["now_cost"] <= 50][:8]
+                                               + sorted([i for i in buyable if pos[i] == pp], key=lambda i: elements[i]["now_cost"], reverse=True)[:8]))
+                        for pp in (1, 2, 3, 4)}
+            sq, _ = build_squad(elements, pos, wc_pools, score, budget_total, owned=set(base_sq), sell=sell,
+                                loyalty=WC_LOYALTY, keep_gk=next(iter(fodder), None))
             gain = val(sq, s0, n) - val(base_sq, s0, n)
             if w == next_gw:  # this week you could make the planned transfers instead
                 gain -= max(0.0, plan["best"]["gain"] - plan["best"]["hits"])
@@ -852,11 +924,12 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         key = f"fh{k}"
         if key not in wc_cache:
             score = {i: lp[i][k] for i in elements}
-            fh_pools = {pp: sorted([i for i in playable if pos[i] == pp], key=lambda i: score[i], reverse=True)[:30]
-                        + [i for i in pools[pp] if elements[i]["now_cost"] <= 50][:6] for pp in (1, 2, 3, 4)}
+            fh_pools = {pp: sorted([i for i in buyable if pos[i] == pp], key=lambda i: score[i], reverse=True)[:30]
+                        + [i for i in pools[pp] if elements[i]["now_cost"] <= 50][:8] for pp in (1, 2, 3, 4)}
             for pp in fh_pools:
                 fh_pools[pp] = list(dict.fromkeys(fh_pools[pp]))
-            sq, val = build_squad(elements, pos, fh_pools, score, budget_total)
+            sq, val = build_squad(elements, pos, fh_pools, score, budget_total, owned=set(after), sell=sell,
+                                  keep_gk=next(iter(fodder), None))
             base_sq = after
             mine = best_xi(base_sq, pos, {i: lp[i][k] for i in base_sq})
             wc_cache[key] = {"squad": sq, "gain": val - (mine["with_captain"] + 0.1 * mine["bench_total"])}
@@ -931,7 +1004,13 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             vals = [(w, g, n) for w, g, n, _ in timing]
             threshold = 20.0
             if timing:
-                row["draft"] = [player_view(i) for i in sorted(timing[0][3], key=lambda i: (pos[i], -hsum5[i]))]
+                dsq = timing[0][3]
+                row["draft"] = [player_view(i) for i in sorted(dsq, key=lambda i: (pos[i], -hsum5[i]))]
+                left = budget_total - sum(sell[i] if i in squad else elements[i]["now_cost"] for i in dsq)
+                n_changes = len([i for i in dsq if i not in squad])
+                row["draft_note"] = (f"{n_changes} changes, £{left / 10:.1f}m left in the bank."
+                                     + (" The model doesn't rate any pricier player higher right now, so the money is kept rather than spent for the sake of it."
+                                        if left >= 20 else ""))
             row["explain"] = ("Wildcard: unlimited free transfers for one gameweek, and the new squad is permanent. "
                               f"Value = how much better a rebuild would do over the {TRANSFER_HORIZON} GWs from that week than your squad "
                               "(this week: after your planned free transfers). Waiting costs you the improvement in the weeks in between. "
@@ -968,7 +1047,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             else:
                 status = "hold"
                 rec_gw = best_gw
-                verdict = (f"Optional. A rebuild only beats your free transfers by {best_val:+.1f}; it's worth it from about +{threshold:.0f}. "
+                verdict = (f"Optional. A rebuild this week only beats your free transfers by {now_val:+.1f}; it's worth it from about +{threshold:.0f}. "
                            f"Keep it for injuries or a bad run, and use it by GW{stop}")
         else:
             rec_gw = best_gw
