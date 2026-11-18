@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FPL Coach</title>
+<style>
+:root{
+  --bg:#f4f5f2;--panel:#ffffff;--panel2:#eef0ea;--ink:#16201a;--muted:#5d6a61;--line:#d9ded6;
+  --accent:#0f7a4a;--accent-ink:#ffffff;--warn:#b26a00;--bad:#b3261e;--good:#0f7a4a;
+  --pitch1:#2f7d4f;--pitch2:#2a7248;--chip:#e7f3ec;
+  --f1:#0b6b3a;--f2:#4caf72;--f3:#c9ccc4;--f4:#e0735f;--f5:#9b1c1c;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f1512;--panel:#17201b;--panel2:#1d2822;--ink:#e6ece7;--muted:#9aa89f;--line:#2a372f;
+  --accent:#3ccf86;--accent-ink:#06210f;--warn:#f0a73a;--bad:#ff7a6e;--good:#3ccf86;
+  --pitch1:#1f5a39;--pitch2:#1b5133;--chip:#1f3328;
+  --f1:#1f9d5c;--f2:#5cc486;--f3:#56605a;--f4:#d9624d;--f5:#a52a2a;
+}}
+:root[data-theme="dark"]{
+  --bg:#0f1512;--panel:#17201b;--panel2:#1d2822;--ink:#e6ece7;--muted:#9aa89f;--line:#2a372f;
+  --accent:#3ccf86;--accent-ink:#06210f;--warn:#f0a73a;--bad:#ff7a6e;--good:#3ccf86;
+  --pitch1:#1f5a39;--pitch2:#1b5133;--chip:#1f3328;
+  --f1:#1f9d5c;--f2:#5cc486;--f3:#56605a;--f4:#d9624d;--f5:#a52a2a;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent)}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:800;letter-spacing:-.02em;font-size:20px}
+.brand span{color:var(--accent)}
+form{display:flex;gap:8px;flex-wrap:wrap}
+input,select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+button{background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:wait}
+nav{display:flex;gap:4px;overflow-x:auto;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+nav button{background:transparent;color:var(--muted);border-radius:999px;padding:6px 14px;white-space:nowrap}
+nav button.on{background:var(--chip);color:var(--ink)}
+main{max-width:1180px;margin:0 auto;padding:16px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card h2{font-size:15px;margin:0 0 10px;letter-spacing:.01em}
+.card h3{font-size:13px;margin:14px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.stat .k{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.stat .v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}.small{font-size:13px}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;background:var(--panel2);border:1px solid var(--line)}
+.pill.play,.pill.good{background:var(--good);color:var(--accent-ink);border-color:transparent}
+.pill.urgent,.pill.warn{background:var(--warn);color:#1a1000;border-color:transparent}
+.pill.bad{background:var(--bad);color:#fff;border-color:transparent}
+.pill.plan{background:var(--chip)}
+ol.actions{margin:0;padding-left:20px}
+ol.actions li{margin:6px 0}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-size:13.5px;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;cursor:default;white-space:nowrap}
+th.sort{cursor:pointer}
+td.num,th.num{text-align:right}
+.scroll{overflow-x:auto}
+.fdr{display:inline-block;min-width:44px;text-align:center;padding:3px 4px;border-radius:6px;font-size:12px;font-weight:700;margin:1px}
+.fdr1,.fdr2{background:var(--f1);color:#fff}.fdr2{background:var(--f2);color:#0b2414}
+.fdr3{background:var(--f3);color:var(--ink)}.fdr4{background:var(--f4);color:#fff}.fdr5{background:var(--f5);color:#fff}
+.blank{background:transparent;border:1px dashed var(--line);color:var(--muted)}
+.pitch{background:repeating-linear-gradient(180deg,var(--pitch1) 0 48px,var(--pitch2) 48px 96px);border-radius:12px;padding:14px 6px;display:flex;flex-direction:column;gap:14px}
+.row{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.pc{width:104px;background:rgba(255,255,255,.94);color:#14201a;border-radius:10px;padding:6px 6px 7px;text-align:center;position:relative;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.pc .n{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc .o{font-size:11px;color:#41504a}
+.pc .x{font-size:15px;font-weight:800}
+.pc .badge{position:absolute;top:-7px;right:-7px;background:#111;color:#fff;border-radius:999px;width:22px;height:22px;font-size:12px;font-weight:800;line-height:22px}
+.pc .badge.v{background:#555}
+.pc .flag{position:absolute;top:-7px;left:-7px;border-radius:999px;width:22px;height:22px;font-size:12px;font-weight:800;line-height:22px;background:var(--warn);color:#1a1000}
+.pc .flag.bad{background:var(--bad);color:#fff}
+.bench{background:var(--panel2);border-radius:12px;padding:10px;margin-top:10px}
+.mv{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.mv:last-child{border-bottom:0}
+.mv .out{color:var(--bad);font-weight:600}.mv .in{color:var(--good);font-weight:600}
+.gain{margin-left:auto;font-weight:800;font-variant-numeric:tabular-nums}
+.bar{height:8px;border-radius:4px;background:var(--panel2);overflow:hidden}
+.bar>i{display:block;height:100%;background:var(--accent)}
+.empty{padding:50px 10px;text-align:center;color:var(--muted)}
+.err{background:color-mix(in srgb,var(--bad) 14%,var(--panel));border:1px solid var(--bad);padding:10px 14px;border-radius:10px;margin-bottom:12px}
+.note{font-size:12.5px;color:var(--muted);margin-top:8px}
+.sig{padding:9px 0;border-bottom:1px solid var(--line)}
+.sig:last-child{border-bottom:0}
+.mine{font-weight:700}
+.tag{font-size:11px;padding:1px 6px;border-radius:5px;background:var(--chip);margin-left:4px}
+.minbar{display:inline-flex;gap:2px;vertical-align:middle;align-items:flex-end;height:20px}
+.minbar i{display:inline-block;width:8px;border-radius:2px;background:var(--accent)}
+svg text{fill:var(--muted);font-size:11px}
+.hide{display:none!important}
+@media (max-width:560px){.pc{width:76px}.pc .n{font-size:11px}.stat .v{font-size:20px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">FPL <span>Coach</span></div>
+  <form id="f">
+    <input id="tid" inputmode="numeric" placeholder="FPL team ID" aria-label="FPL team ID" size="12">
+    <button id="go">Analyse</button>
+    <button type="button" class="ghost" id="theme" title="Toggle light/dark">Theme</button>
+  </form>
+</header>
+<nav id="tabs"></nav>
+<main id="app"><div class="empty">
+  <p><b>Enter your FPL team ID to start.</b></p>
+  <p class="small">Find it on the FPL website: open <i>Points</i> and look at the address bar: fantasy.premierleague.com/entry/<b>1234567</b>/event/12.</p>
+</div></main>
+
+<script>
+const TABS=[["overview","This week"],["team","My team"],["transfers","Transfers"],["signals","Signals"],["chips","Chips"],["fixtures","Fixtures"],["players","Players"],["history","History"]];
+let STATIC=null,D=null,S=null,tab="overview",sortKey="xpts_h",sortDir=-1,posFilter="ALL",maxPrice="",search="";
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const fmt=(n,d=1)=>n==null?"–":Number(n).toFixed(d);
+const big=n=>n==null?"–":Number(n).toLocaleString("en-GB");
+
+function theme(){const t=store.get("theme");if(t)document.documentElement.dataset.theme=t}
+theme();
+$("#theme").onclick=()=>{const cur=document.documentElement.dataset.theme||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");const n=cur==="dark"?"light":"dark";document.documentElement.dataset.theme=n;store.set("theme",n)};
+
+function navs(){ $("#tabs").innerHTML=TABS.map(([k,l])=>`<button class="${k===tab?"on":""}" data-t="${k}">${l}</button>`).join("");
+  $("#tabs").querySelectorAll("button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;store.set("tab",tab);navs();render()}); }
+
+async function load(refresh){
+  const id=$("#tid").value.trim();
+  if(!/^\d+$/.test(id)){$("#app").innerHTML=`<div class="err">Team ID should be a number, like 1234567.</div>`;return}
+  store.set("tid",id);
+  $("#go").disabled=true;$("#app").innerHTML=`<div class="empty">Crunching the numbers…</div>`;
+  try{
+    const r=await fetch(`/api/team/${id}${refresh?"?refresh=1":""}`);const j=await r.json();
+    if(!r.ok||j.error)throw new Error(j.error||r.statusText);
+    D=j;S=null;navs();render();
+  }catch(e){$("#app").innerHTML=`<div class="err">${esc(e.message)}</div>`}
+  finally{$("#go").disabled=false}
+}
+$("#f").onsubmit=e=>{e.preventDefault();load(false)};
+
+function fx(cells){return cells.map(c=>c.length?c.map(f=>`<span class="fdr fdr${f.fdr||3}">${esc(f.opp)}${f.home?"":" (a)"}</span>`).join(""):`<span class="fdr blank">–</span>`).join("")}
+function fxNext(p){const c=p.fixtures[0]||[];return c.length?c.map(f=>`${f.opp}${f.home?" (H)":" (A)"}`).join(", "):"No game"}
+function flag(p){if(p.status==="a")return"";const bad=["i","s","u","n"].includes(p.status)||(p.chance!=null&&p.chance<=25);return `<span class="flag ${bad?"bad":""}" title="${esc(p.news)}">${bad?"!":"?"}</span>`}
+function byId(id){return D.squad.find(p=>p.id===id)}
+
+function render(){
+  if(!D)return;
+  const m=D.meta;
+  const views={overview,team,transfers,signals,chips,fixtures,players,history};
+  $("#app").innerHTML=(views[tab]||overview)();
+  bind();
+}
+
+function head(){
+  const m=D.meta,g=D.manager;
+  const hrs=m.hours_to_deadline;let dl="–";
+  if(hrs!=null){dl=hrs<0?"passed":hrs<48?`${Math.floor(hrs)}h ${Math.round((hrs%1)*60)}m`:`${Math.floor(hrs/24)}d ${Math.floor(hrs%24)}h`}
+  return `<div class="grid g4" style="margin-bottom:14px">
+  <div class="card stat"><div class="k">${esc(g.team_name)}</div><div class="v">${big(g.overall_points)} pts</div><div class="small muted">Rank ${big(g.overall_rank)}</div></div>
+  <div class="card stat"><div class="k">GW${m.next_gw} deadline</div><div class="v">${dl}</div><div class="small muted">${m.deadline?new Date(m.deadline).toLocaleString("en-GB",{weekday:"short",day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</div></div>
+  <div class="card stat"><div class="k">Free transfers (est.)</div><div class="v">${m.free_transfers}</div><div class="small muted">Bank £${fmt(m.bank)}m</div></div>
+  <div class="card stat"><div class="k">Projected GW${m.next_gw}</div><div class="v">${fmt(D.lineup.xpts)} xPts</div><div class="small muted">Best XI incl. captain</div></div>
+  </div>`;
+}
+
+function overview(){
+  const caps=D.captaincy.map((p,i)=>`<tr><td>${i+1}. <b>${esc(p.name)}</b> <span class="muted small">${esc(p.team)}</span></td><td class="small">${esc(fxNext(p))}</td><td class="num"><b>${fmt(p.xpts_next)}</b></td><td class="num">${fmt(p.selected)}%</td><td class="small muted">${esc(p.eo_note)}</td></tr>`).join("");
+  const chips=D.chips.filter(c=>!["used","expired"].includes(c.status)).map(c=>`<div class="sig"><span class="pill ${c.status}">${esc(c.label)}</span> <span class="small">${esc(c.verdict)}</span></div>`).join("");
+  return head()+`<div class="grid g2">
+  <div class="card"><h2>Your GW${D.meta.next_gw} game plan</h2><ol class="actions">${D.actions.map(a=>`<li>${esc(a)}</li>`).join("")}</ol>
+   <div class="note">${D.meta.notes.map(esc).join("<br>")}</div></div>
+  <div class="card"><h2>Captaincy shortlist</h2><div class="scroll"><table><tr><th>Player</th><th>Fixture</th><th class="num">xPts</th><th class="num">Owned</th><th></th></tr>${caps}</table></div>
+   <h3>Chips</h3>${chips||'<div class="muted small">No chips left in this window.</div>'}</div>
+  </div>`;
+}
+
+function card(p){return `<div class="pc">${p.is_captain?'<span class="badge">C</span>':p.is_vice?'<span class="badge v">V</span>':""}${flag(p)}
+ <div class="n" title="${esc(p.full_name)}">${esc(p.name)}</div><div class="o">${esc(fxNext(p))}</div><div class="x">${fmt(p.xpts_next)}</div></div>`}
+
+function team(){
+  const L=D.lineup;const xi=L.xi.map(byId);
+  const rows=[1,2,3,4].map(pid=>`<div class="row">${xi.filter(p=>p.pos_id===pid).map(card).join("")}</div>`).join("");
+  const bench=L.bench.map(byId).map(card).join("");
+  const sq=[...D.squad].sort((a,b)=>a.pos_id-b.pos_id||b.xpts_h-a.xpts_h).map(p=>`<tr><td><b>${esc(p.name)}</b> <span class="muted small">${esc(p.team)} · ${p.pos}</span>${p.news?`<div class="small" style="color:var(--warn)">${esc(p.news)}</div>`:""}</td>
+   <td class="num">£${fmt(p.price)}</td><td class="num">£${fmt(p.selling_price)}</td><td class="num">${fmt(p.form)}</td><td>${fx(p.fixtures)}</td><td class="num"><b>${fmt(p.xpts_h)}</b></td></tr>`).join("");
+  return head()+`<div class="grid g2">
+  <div class="card"><h2>Best XI for GW${L.gw} · ${esc(L.formation)} · ${fmt(L.xpts)} xPts</h2>
+   <div class="pitch">${rows}</div><div class="bench"><div class="small muted" style="margin-bottom:6px">Bench (in this order)</div><div class="row">${bench}</div></div>
+   ${L.changes.length?`<h3>Changes from your current lineup</h3><ul>${L.changes.map(c=>`<li>${esc(c)}</li>`).join("")}</ul>`:'<div class="note">Matches your current lineup.</div>'}
+  </div>
+  <div class="card"><h2>Squad outlook</h2><div class="scroll"><table><tr><th>Player</th><th class="num">Price</th><th class="num">Sell</th><th class="num">Form</th><th>Next ${D.meta.horizon.length}</th><th class="num">xPts ${D.meta.transfer_horizon}GW</th></tr>${sq}</table></div>
+  <div class="note">“Sell” is your estimated selling price: you keep half of any price rise.</div></div></div>`;
+}
+
+function mv(m){return `<div class="mv"><span class="out">− ${m.out.map(o=>`${esc(o.name)} <span class="muted small">£${fmt(o.price)}</span>`).join(", ")}</span><span>→</span>
+ <span class="in">+ ${m.in.map(o=>`${esc(o.name)} <span class="muted small">${esc(o.team)} £${fmt(o.price)}</span>`).join(", ")}</span>
+ <span class="gain">+${fmt(m.gain)}</span><span class="small muted" style="width:100%">Bank after: £${fmt(m.bank_after)}m</span></div>`}
+
+function transfers(){
+  const T=D.transfers,P=T.plan;
+  let rec;
+  if(P.kind==="roll")rec=`<p><b>Roll the transfer.</b> No move beats saving it (worth about ${fmt(T.roll_value)} pts). You'll have ${Math.min(T.free_transfers+1,5)} next week.</p>`;
+  else rec=`<p><b>${P.kind==="double"?"Make two transfers":"Make one transfer"}${P.hits?` (take a −${P.hits} hit)`:""}.</b> Expected net gain ${fmt(P.net)} pts over ${D.meta.transfer_horizon} GWs.</p>${mv(P.moves)}`;
+  const sells=T.sell.map(s=>`<div class="sig"><span class="pill ${s.severity>=4?"bad":s.severity>=2?"warn":""}">${esc(s.pos)}</span> <b>${esc(s.name)}</b><ul class="small" style="margin:4px 0 0;padding-left:18px">${s.reasons.map(r=>`<li>${esc(r)}</li>`).join("")}</ul></div>`).join("")||'<div class="muted small">No red flags in your squad.</div>';
+  const pos=store.get("buypos")||"MID";const mode=store.get("buymode")||"affordable";
+  const list=(T.buy[pos]||{})[mode]||[];
+  const buy=list.map(p=>`<tr><td><b>${esc(p.name)}</b> <span class="muted small">${esc(p.team)}</span>${p.status!=="a"?` <span class="pill warn">${p.chance??0}%</span>`:""}</td><td class="num">£${fmt(p.price)}</td><td class="num">${fmt(p.form)}</td><td class="num">${fmt(p.selected)}%</td><td>${fx(p.fixtures.slice(0,5))}</td><td class="num"><b>${fmt(p.xpts_h)}</b></td></tr>`).join("");
+  return head()+`<div class="grid g2">
+  <div class="card"><h2>Recommendation · ${T.free_transfers} FT · £${fmt(T.bank)}m in the bank</h2>${rec}
+   <h3>Best single transfers</h3>${T.singles.map(mv).join("")||'<div class="muted small">None found.</div>'}
+   <h3>Best double transfers</h3>${T.doubles.map(mv).join("")||'<div class="muted small">None found.</div>'}
+   <div class="note">Gain = extra expected points for your best XI plus captain over the next ${D.meta.transfer_horizon} GWs, with later weeks weighted a little less. Take a −4 hit only when the gain is clearly above 4.</div></div>
+  <div class="card"><h2>Sell watchlist</h2>${sells}</div>
+  <div class="card" style="grid-column:1/-1"><h2>Who to buy</h2>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${["GKP","DEF","MID","FWD"].map(p=>`<button class="${p===pos?"":"ghost"}" data-buypos="${p}">${p}</button>`).join("")}
+   <select id="buymode"><option value="affordable"${mode==="affordable"?" selected":""}>Affordable now</option><option value="top"${mode==="top"?" selected":""}>Best overall</option><option value="differentials"${mode==="differentials"?" selected":""}>Differentials (&lt;7% owned)</option></select></div>
+   <div class="scroll"><table><tr><th>Player</th><th class="num">Price</th><th class="num">Form</th><th class="num">Owned</th><th>Next 5</th><th class="num">xPts ${D.meta.transfer_horizon}GW</th></tr>${buy}</table></div></div>
+  </div>`;
+}
+
+function chips(){
+  const rows=D.chips.map(c=>{
+    const max=Math.max(1,...c.values.map(v=>v.value));
+    const vals=c.values.length?`<table><tr><th>GW</th><th style="width:50%">Value</th><th class="num">Pts</th><th>Note</th></tr>${c.values.map(v=>`<tr><td>GW${v.gw}</td><td><div class="bar"><i style="width:${Math.max(0,v.value)/max*100}%"></i></div></td><td class="num">${fmt(v.value)}</td><td class="small muted">${esc(v.note)}</td></tr>`).join("")}</table>`:"";
+    const draft=c.draft?`<h3>Suggested ${esc(c.label)} squad</h3><div class="small">${c.draft.map(p=>`${p.pos} <b>${esc(p.name)}</b> (${esc(p.team)}, £${fmt(p.price)})`).join(" · ")}</div>`:"";
+    const also=(c.also||[]).map(a=>`<div class="small muted">GW${a.window[0]}–${a.window[1]}: ${esc(a.verdict)}</div>`).join("");
+    return `<div class="card"><h2>${esc(c.label)} <span class="pill ${c.status}">${esc(c.status)}</span> <span class="small muted">GW${c.window[0]}–${c.window[1]}</span></h2><p>${esc(c.verdict)}</p>${vals}${draft}${also}</div>`}).join("");
+  return head()+`<div class="card" style="margin-bottom:14px"><h2>How chips are judged</h2><div class="small">
+  <b>Bench Boost</b>: your bench's expected points; best in a double gameweek when all 15 have games.
+  <b>Triple Captain</b>: your captain's expected points; look for a premium with two good fixtures.
+  <b>Free Hit</b>: how much better a one-week dream team would do than your squad, compared with a normal week; ideal for blank weeks.
+  <b>Wildcard</b>: how much a full rebuild gains over the next ${D.meta.transfer_horizon} weeks.
+  Chips must be used within their window, so the app warns you when a window is closing.</div></div><div class="grid g2">${rows}</div>`;
+}
+
+function fixtures(){
+  const F=D.fixtures;const s=store.get("fxsort")||"avg_fdr";
+  const teams=[...F.teams].sort((a,b)=>s==="avg_fdr"?a.avg_fdr-b.avg_fdr:b[s]-a[s]);
+  const mine=new Set(D.squad.map(p=>p.team_id));
+  return head()+`<div class="card"><h2>Fixture ticker · GW${F.gws[0]}–${F.gws[F.gws.length-1]}</h2>
+  <div style="margin-bottom:8px" class="small">Sort: <select id="fxsort"><option value="avg_fdr"${s==="avg_fdr"?" selected":""}>Easiest (FPL difficulty)</option><option value="attack"${s==="attack"?" selected":""}>Best for attackers</option><option value="cs"${s==="cs"?" selected":""}>Best for clean sheets</option></select></div>
+  <div class="scroll"><table><tr><th>Team</th>${F.gws.map(g=>`<th>GW${g}</th>`).join("")}<th class="num">Avg</th><th class="num">Atk</th><th class="num">CS</th></tr>
+  ${teams.map(t=>`<tr><td class="${mine.has(t.id)?"mine":""}">${esc(t.short)}${mine.has(t.id)?'<span class="tag">yours</span>':""}</td>${t.cells.map(c=>`<td>${fx([c])}</td>`).join("")}<td class="num">${fmt(t.avg_fdr,2)}</td><td class="num">${fmt(t.attack)}</td><td class="num">${fmt(t.cs)}</td></tr>`).join("")}</table></div>
+  <div class="note">Colours are FPL's official difficulty (green = easy, red = hard). “Atk” is expected attacking returns versus average; “CS” is expected clean sheets. Both are summed over the window, so double gameweeks count twice. A dashed cell is a blank.</div></div>`;
+}
+
+function players(){
+  let rows=D.players.filter(p=>(posFilter==="ALL"||p.pos===posFilter)&&(!maxPrice||p.price<=+maxPrice)&&(!search||(p.name+" "+p.full_name+" "+p.team).toLowerCase().includes(search.toLowerCase())));
+  rows.sort((a,b)=>{const x=a[sortKey],y=b[sortKey];return (typeof x==="string"?x.localeCompare(y):x-y)*sortDir});
+  const owned=new Set(D.squad.map(p=>p.id));
+  const cols=[["name","Player"],["price","£"],["form","Form"],["total_points","Pts"],["xg","xG"],["xa","xA"],["selected","Own%"],["xpts_next","Next"],["xpts_h",`${D.meta.transfer_horizon}GW`]];
+  return head()+`<div class="card"><h2>Player projections</h2>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"><input id="q" placeholder="Search" value="${esc(search)}"><select id="pf">${["ALL","GKP","DEF","MID","FWD"].map(p=>`<option${p===posFilter?" selected":""}>${p}</option>`).join("")}</select><input id="mp" placeholder="Max £m" size="7" value="${esc(maxPrice)}"></div>
+  <div class="scroll"><table><tr>${cols.map(([k,l])=>`<th class="sort ${k==="name"?"":"num"}" data-k="${k}">${l}${sortKey===k?(sortDir<0?" ↓":" ↑"):""}</th>`).join("")}<th>Fixtures</th></tr>
+  ${rows.slice(0,150).map(p=>`<tr><td class="${owned.has(p.id)?"mine":""}">${esc(p.name)} <span class="muted small">${esc(p.team)} · ${p.pos}</span>${p.status!=="a"?` <span class="pill warn" title="${esc(p.news)}">${p.chance??0}%</span>`:""}${p.price_trend?` <span class="small" title="Price ${p.price_trend}">${p.price_trend==="rising"?"▲":"▼"}</span>`:""}</td>
+   <td class="num">${fmt(p.price)}</td><td class="num">${fmt(p.form)}</td><td class="num">${p.total_points}</td><td class="num">${fmt(p.xg,2)}</td><td class="num">${fmt(p.xa,2)}</td><td class="num">${fmt(p.selected)}</td><td class="num">${fmt(p.xpts_next)}</td><td class="num"><b>${fmt(p.xpts_h)}</b></td><td>${fx(p.fixtures.slice(0,4))}</td></tr>`).join("")}</table></div>
+  <div class="note">Bold names are in your squad. ▲▼ = net transfers suggest a price change soon.</div></div>`;
+}
+
+function history(){
+  const H=D.history,g=H.gws;
+  if(!g.length)return head()+`<div class="card">No history yet.</div>`;
+  const W=760,Ht=200,pad=28,max=Math.max(...g.map(x=>Math.max(x.points||0,x.avg||0)),10);
+  const X=i=>pad+i*(W-pad*2)/Math.max(g.length-1,1),Y=v=>Ht-pad-(v/max)*(Ht-pad*2);
+  const line=k=>g.map((x,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(x[k]||0).toFixed(1)}`).join("");
+  const svg=`<svg viewBox="0 0 ${W} ${Ht}" width="100%" role="img" aria-label="Points per gameweek versus average">
+   <path d="${line("avg")}" fill="none" stroke="var(--muted)" stroke-width="2" stroke-dasharray="4 4"/>
+   <path d="${line("points")}" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+   ${g.map((x,i)=>`<circle cx="${X(i)}" cy="${Y(x.points||0)}" r="3.5" fill="var(--accent)"><title>GW${x.gw}: ${x.points} pts (avg ${x.avg})</title></circle>`).join("")}
+   ${g.map((x,i)=>i%2===0||g.length<12?`<text x="${X(i)}" y="${Ht-8}" text-anchor="middle">${x.gw}</text>`:"").join("")}</svg>`;
+  return head()+`<div class="grid g4" style="margin-bottom:14px">
+   <div class="card stat"><div class="k">Beat the average</div><div class="v">${H.totals.above_avg}/${H.totals.weeks}</div></div>
+   <div class="card stat"><div class="k">Points left on bench</div><div class="v">${H.totals.bench_points}</div></div>
+   <div class="card stat"><div class="k">Points spent on hits</div><div class="v">${H.totals.hits}</div></div>
+   <div class="card stat"><div class="k">Team value</div><div class="v">£${fmt(D.meta.team_value)}m</div></div></div>
+  <div class="card"><h2>Points per gameweek <span class="small muted">(you vs dashed average)</span></h2>${svg}
+  <div class="scroll"><table><tr><th>GW</th><th class="num">Pts</th><th class="num">Avg</th><th class="num">Bench</th><th class="num">Transfers</th><th class="num">Hits</th><th>Chip</th><th class="num">Overall rank</th></tr>
+  ${[...g].reverse().map(x=>`<tr><td>${x.gw}</td><td class="num"><b>${x.points}</b></td><td class="num">${x.avg??"–"}</td><td class="num">${x.bench}</td><td class="num">${x.transfers}</td><td class="num">${x.hits?"−"+x.hits:""}</td><td>${x.chip?`<span class="pill">${esc(x.chip)}</span>`:""}</td><td class="num">${big(x.overall_rank)}</td></tr>`).join("")}</table></div></div>`;
+}
+
+function signals(){
+  const last=store.get("sig_at_"+D.manager.id);
+  let body;
+  if(!S)body=`<div class="empty">Press <b>Refresh signals</b> for the latest injury news, availability changes, minutes trends and headlines about your players.<br><span class="small">Best used on Friday, after the managers' press conferences, and again before the deadline.</span></div>`;
+  else{
+    const lab=p=>`<span class="${p.mine?"mine":""}">${esc(p.name)}</span> <span class="muted small">${esc(p.team)} · ${p.pos}</span>${p.mine?'<span class="tag">yours</span>':""}`;
+    const ch=S.changes.length?S.changes.map(c=>`<div class="sig"><span class="pill ${c.kind}">${c.kind==="bad"?"▼":c.kind==="good"?"▲":"•"}</span> ${lab(c)}<div class="small">${c.changes.map(esc).join(" · ")}</div></div>`).join(""):`<div class="muted small">${S.previous?"Nothing important has changed since "+new Date(S.previous).toLocaleString("en-GB"):"This is your first refresh. Next time you'll see what changed since now."}</div>`;
+    const sq=S.squad.map(r=>`<tr><td>${lab(r)}</td><td><span class="pill ${r.level==="ok"?"":r.level}">${r.status==="a"?"OK":r.chance+"%"}</span></td>
+      <td><span class="minbar" title="${r.last5_minutes.join(", ")} mins">${r.last5_minutes.map(m=>`<i style="height:${4+m/90*16}px;opacity:${m?1:.25}"></i>`).join("")}</span></td><td class="small">${esc(r.flag||r.news)}</td></tr>`).join("");
+    const news=S.fresh_news.map(n=>`<div class="sig">${lab(n)} <span class="pill ${["i","s","u","n"].includes(n.status)?"bad":"warn"}">${n.chance}%</span><div class="small">${esc(n.news)} <span class="muted">· ${new Date(n.added).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</span></div></div>`).join("")||'<div class="muted small">No new flags this week.</div>';
+    const hl=S.headlines.length?S.headlines.map(h=>`<div class="sig"><a href="${esc(h.link)}" target="_blank" rel="noopener">${esc(h.title)}</a> <span class="muted small">${esc(h.source)}</span><div class="small">${h.players.map(lab).join(", ")}</div></div>`).join(""):`<div class="muted small">${S.feeds_reachable?"No headlines mention your players right now.":"News feeds couldn't be reached."}</div>`;
+    const mom=k=>S.momentum[k].map(p=>`<tr><td>${lab(p)}</td><td class="num">£${fmt(p.price)}</td><td class="num">${big(p.count)}</td></tr>`).join("");
+    body=`<div class="grid g2">
+    <div class="card"><h2>What's changed${S.previous?` since ${new Date(S.previous).toLocaleString("en-GB",{weekday:"short",hour:"2-digit",minute:"2-digit"})}`:""}</h2>${ch}</div>
+    <div class="card"><h2>Your squad: fitness and minutes</h2><div class="scroll"><table><tr><th>Player</th><th>Status</th><th>Last 5</th><th>Signal</th></tr>${sq}</table></div><div class="note">Bars show minutes in each of the last 5 matches. Faded bars mean they didn't play.</div></div>
+    <div class="card"><h2>Injury and team news (last 7 days)</h2>${news}</div>
+    <div class="card"><h2>Headlines about your players</h2>${hl}</div>
+    <div class="card"><h2>Most bought this GW</h2><table><tr><th>Player</th><th class="num">£</th><th class="num">In</th></tr>${mom("in")}</table></div>
+    <div class="card"><h2>Most sold this GW</h2><table><tr><th>Player</th><th class="num">£</th><th class="num">Out</th></tr>${mom("out")}</table></div></div>`;
+  }
+  return head()+`<div class="card" style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+   <div><b>Player signals</b><div class="small muted">${STATIC?"Updated "+new Date(STATIC.built).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"})+(STATIC.trigger==="schedule"?" (scheduled)":""):last?"Last refreshed "+new Date(last).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"}):"Not refreshed yet"}</div></div>
+   ${STATIC?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><a href="${esc(workflowUrl())}" target="_blank" rel="noopener"><button type="button">Refresh signals + advice</button></a><span class="small muted" style="max-width:300px">Opens GitHub: press <b>Run workflow</b>, wait about 2 minutes, then reload this page.</span></div>`
+   :`<div style="display:flex;gap:8px"><button id="sigbtn">Refresh signals</button><button class="ghost" id="reanalyse" title="Re-run the projections with the latest news">Refresh signals + advice</button></div>`}</div>${body}`;
+}
+
+async function loadSignals(alsoAdvice){
+  const b=$("#sigbtn");if(b){b.disabled=true;b.textContent="Checking…"}
+  try{
+    const r=await fetch(`/api/signals/${D.manager.id}?refresh=1`);const j=await r.json();
+    if(!r.ok||j.error)throw new Error(j.error||r.statusText);
+    S=j;store.set("sig_at_"+D.manager.id,j.refreshed);
+    if(alsoAdvice){await load(true);tab="signals";navs()}
+    render();
+  }catch(e){if(b){b.disabled=false;b.textContent="Refresh signals"}alert("Couldn't refresh signals: "+e.message)}
+}
+
+function bind(){
+  document.querySelectorAll("[data-buypos]").forEach(b=>b.onclick=()=>{store.set("buypos",b.dataset.buypos);render()});
+  const bm=$("#buymode");if(bm)bm.onchange=()=>{store.set("buymode",bm.value);render()};
+  const fs=$("#fxsort");if(fs)fs.onchange=()=>{store.set("fxsort",fs.value);render()};
+  document.querySelectorAll("th.sort").forEach(th=>th.onclick=()=>{const k=th.dataset.k;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=k==="name"?1:-1}render()});
+  const q=$("#q");if(q)q.oninput=()=>{search=q.value;const pos=q.selectionStart;render();const n=$("#q");n.focus();n.setSelectionRange(pos,pos)};
+  const pf=$("#pf");if(pf)pf.onchange=()=>{posFilter=pf.value;render()};
+  const mp=$("#mp");if(mp)mp.onchange=()=>{maxPrice=mp.value.replace(/[^\d.]/g,"");render()};
+  const sb=$("#sigbtn");if(sb)sb.onclick=()=>loadSignals(false);
+  const ra=$("#reanalyse");if(ra)ra.onclick=()=>loadSignals(true);
+}
+
+function workflowUrl(){
+  const m=location.hostname.match(/^([^.]+)\.github\.io$/);const repo=location.pathname.split("/").filter(Boolean)[0];
+  return m&&repo?`https://github.com/${m[1]}/${repo}/actions/workflows/update.yml`:"https://github.com";
+}
+async function boot(){
+  tab=store.get("tab")||"overview";
+  // Hosted mode: the data was built by GitHub Actions and published next to this page.
+  try{
+    const r=await fetch("data/team.json",{cache:"no-store"});
+    if(r.ok){
+      D=await r.json();
+      const [s,b]=await Promise.all([fetch("data/signals.json",{cache:"no-store"}).then(x=>x.ok?x.json():null).catch(()=>null),
+                                     fetch("data/build.json",{cache:"no-store"}).then(x=>x.ok?x.json():{}).catch(()=>({}))]);
+      S=s;STATIC=b||{};
+      $("#tid").classList.add("hide");$("#go").classList.add("hide");
+      navs();render();return;
+    }
+  }catch(e){}
+  const saved=store.get("tid");
+  if(saved){$("#tid").value=saved;load(false)}
+}
+boot();
+</script>
+</body>
+</html>
