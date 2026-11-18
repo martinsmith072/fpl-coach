@@ -1,0 +1,75 @@
+{
+ "gameweek": 11,
+ "generated_at": "2026-11-18T17:35:26+00:00",
+ "news_collected_at": "2026-11-18T17:33:48.527197+00:00",
+ "summary": "Early read on Wednesday, before the press conferences. The main question is Arsenal's defence: Saliba is back to full fitness and Sky Sports frames it as Saliba or Konsa. Villa's Manzambi looks doubtful with his calf problem, while Rayan's knock on international duty isn't serious. Thiago's suspension starts against Everton, as FPL already shows. Friday's 15:00 briefing will update this after the managers have spoken.",
+ "players": [
+  {
+   "id": 31,
+   "name": "Konsa",
+   "start_chance": 50,
+   "confidence": "medium",
+   "verdict": "Coin-flip: Sky Sports says Arteta has a selection dilemma now Saliba is fully fit, although Konsa scored for England over the break.",
+   "sources": [
+    {
+     "title": "William Saliba or Ezri Konsa? Mikel Arteta has tough Arsenal selection dilemma when French defender returns to full fitness",
+     "source": "Sky Sports",
+     "link": "https://news.google.com/rss/articles/CBMigAJBVV95cUxORGNDUHBmSW5hb29MVDdDb0d4dmNORk9xcjM4NEJabHEzRFBOZF9uZk0tTTloa0twNzZRM0VNTUppYVFNaWdodXJaTHJNbFBGcGI4ODdkREdvN08tc2gzc1F4dnFpby0zazgtajQ4TU9OQ1E3RjlxQlhkekJmd0tacS1zUDZ0eXF3MDJFSkw4R0kzWjNxaUNGSHo1N2xFNEs3YkdSeVFSbEs3TzlDYzRwWDdYNzNHbnhiTG9wbVREVGVZcXJJUzNvcm8yN0xOdUZ1enRJUURKV0lhRFBCRTlrdEdjZ2lOZ19FQmdPY1FjUDRhU2o4TlViX0FGeTd6UXM2?oc=5"
+    },
+    {
+     "title": "Rotation incoming! What to do with the Arsenal defence in FPL?",
+     "source": "Premier League",
+     "link": "https://news.google.com/rss/articles/CBMiqgFBVV95cUxPWHM1ZFRPZV9YSVF0Z0VoZl9ZUG5DemFUYjFjay1Hc2RfV0ZSTkg3N21YZEZld1laVjdhbHowckRRWUhZeU1iQ1VLLUd2LTByb0lUQnIyV3VJX3dhMXc0OGxrakx5bzJQSnR3TFpqT3liV3IxTl9QZHdNWkYyUmlva1FSZkdEZ0lOR1VJZHROdDRqQkVVVmk3WVFQaWJSMnZzUlpMQXRmMjdjQQ?oc=5"
+    },
+    {
+     "title": "Konsa and White score as England win in Spain",
+     "source": "Arsenal.com",
+     "link": "https://news.google.com/rss/articles/CBMikAFBVV95cUxOeEw3RTdQSzNEb3ZjcDNWRXpyeTlJb1BOQ1hEcVpEd1ZZM0hya2FZNTdacDhnam53UVJaOUNreWN1VGk2UzZSbkNlejVfcXc0dWhzZWZZeGlDelkteEVsaU04QUFJcXRUbFJCYjdtTldTX1g2Nko2RUFINi16TzI2WWgyeWUtd05uQlBlNjc4Wk8?oc=5"
+    }
+   ]
+  },
+  {
+   "id": 53,
+   "name": "Manzambi",
+   "start_chance": 40,
+   "confidence": "medium",
+   "verdict": "Doubtful: several outlets list his calf injury among Villa's likely absentees against Sunderland. Check Emery's press conference.",
+   "sources": [
+    {
+     "title": "Aston Villa injury news | Wan-Bissaka, Cash and Manzambi latest",
+     "source": "Read Aston Villa",
+     "link": "https://news.google.com/rss/articles/CBMikgFBVV95cUxNYXpuVkxkNFZkaXF2QWx4ckZMQ0luVjhCTTVvYkhPcHpVZzB0ZnYtS0pNLVpRV1Y0OFM1bzduT0pXYnZEOXlIUnlVa3VvSE5EZ2JZWEpycElwNXdsM1lVdmJTOXhNT2xOSmpUN3RIaUFHUl95ak1WTnpXLVFjTXlpZk1EWG9zN0FKU0NkSzVhblJSdw?oc=5"
+    },
+    {
+     "title": "Manzambi, Cash and Ruggeri: Aston Villa injury list ahead of Sunderland clash",
+     "source": "3 Added Minutes",
+     "link": "https://news.google.com/rss/articles/CBMivgFBVV95cUxNVVR6OWRkTWUxSkZJT1Brdllwbm5xMXEwZ25tM1pZUEFtWmhhSUV6T25rU3RSSDFUYTVZZHJnRVZkSTRPOVpLbVprcm5ZOUVnaVJpM3pwNnJXNE1TamVMTzJfcUJpRFc2d3ZKeWRqQktLUF8zc204NmZodnNteGFZWHNOSGdOTFZScU96WFJCMk44TUhWcExSVWdTelBmWi1Cb3RXMHdWc3JnejhkM20xMVBKd1g3MXd6RS1XaVh3?oc=5"
+    },
+    {
+     "title": "Nine players could miss Aston Villa vs Sunderland after Johan Manzambi and Matty Cash blows",
+     "source": "Birmingham Live",
+     "link": "https://news.google.com/rss/articles/CBMisAFBVV95cUxNTEVaTjBLQzhzNHVXb2p6c2R1TmVwNVZaVmxYeU52ajJnaWVOZEJfemJhRGkxbmtOWnowcFAwYW84a01TNXVJOXFhQzBZalU0QmpHaE15VUpfeXg5Q0s1TW5OR21nNV9tTF9kbk1sT3EwdTBMLUt0X1JtRnVocDN4Y2hmdFF4dHZRSm9LTnFRSWg5cTdCRTBhc1pJU3BYZDlJMGRGS1hKWHFNazA3SlFFeQ?oc=5"
+    }
+   ]
+  },
+  {
+   "id": 67,
+   "name": "Rayan",
+   "start_chance": 90,
+   "confidence": "medium",
+   "verdict": "Should be fine: Ancelotti said his knock with Brazil wasn't serious, and he scored in the next game.",
+   "sources": [
+    {
+     "title": "Rayan picks up knock with Brazil but Ancelotti confirms it's not serious",
+     "source": "Bournemouth Echo",
+     "link": "https://news.google.com/rss/articles/CBMingFBVV95cUxQazkzMkF2NjVTWVROMHpXeUN3S2NpUGRtTWt6ZHJhSFB1eTZfRW9CNWlaUlUyOFh6SmIxdkxLTUwydHpKNVlqODlwWkVhd3dMSmctR09BX0lxU1A4dlJRR3dORnVKQ2hXcU9pdUNfU2Nmd3ZXTmRHT3BYd0FGUzdWNEFEZS1VOGIxOVpTdGl4MjkyYzAwMlJLb3daeTFHUQ?oc=5"
+    },
+    {
+     "title": "Rayan Shakes Off Knock To Score In Brazil's Emphatic Win Over Singapore",
+     "source": "roundtable.io",
+     "link": "https://news.google.com/rss/articles/CBMi2gFBVV95cUxPRGpjSXVnQVUwQ09TRVRQUVg0VmRUX2FRTUFFcFlHRi1CSWZIZ1l3YTlXMW1UMXpSTmZiYXEwU1ZYMkhNc2U4N2xkWGtnZHlDSG4yUGl3OExXLXQ1WXFCWkpONC1TVk5xT05OY0Zva0xVbUk3dHRYa1V5VnFQTlRfeGppUjJ1N1dRTVhNbm1IN1htbFk3R0p1N3BITGl4UGpkYWp5Szl6Ry1FNG1RQl9sOUNTaVJNbHg1T2Y0Rzg3aTBsSDVRZzRYeUhCRjVWejhnWEpQenh0amFZZw?oc=5"
+    }
+   ]
+  }
+ ]
+}
