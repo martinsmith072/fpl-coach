@@ -15,6 +15,7 @@ crystal ball.
 from __future__ import annotations
 
 import math
+import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -32,6 +33,7 @@ WEIGHTS = [1.0, 0.92, 0.85, 0.78, 0.72, 0.66]  # later weeks are less certain
 TRANSFER_HORIZON = 5  # gameweeks used to judge a transfer
 HIT_COST = 4
 ROLL_VALUE = 1.5  # rough value of banking a free transfer
+HIT_MARGIN = 2.0  # extra points a -4 hit must clear, because projections are uncertain
 FODDER_GK_MAX = 45  # £4.5m: a backup keeper this cheap is assumed to be bench fodder
 WC_LOYALTY = 2.5  # a Wildcard only swaps a player you own if the new one is ~2.5 pts better over 5 GWs
 QUALITY_PER_M = 0.25  # tie-break towards proven (pricier) players when projections are close
@@ -404,6 +406,45 @@ class Projector:
         return out
 
 
+# --------------------------------------------------------------------------- player lookup
+
+def resolve_player(ref: Any, elements: Dict[int, Dict[str, Any]], teams: Dict[int, Dict[str, Any]],
+                   prefer: Sequence[int] = (), exclude: Sequence[int] = ()) -> Optional[int]:
+    """Find a player from an FPL id, a name ("Barry"), or a name with club ("Palmer (CHE)")."""
+    if ref is None:
+        return None
+    if isinstance(ref, int) or str(ref).strip().isdigit():
+        pid = int(ref)
+        return pid if pid in elements else None
+    import unicodedata
+
+    def norm(x: str) -> str:
+        return unicodedata.normalize("NFKD", x or "").encode("ascii", "ignore").decode().lower().strip()
+
+    text = str(ref)
+    club = None
+    m = re.match(r"^(.*?)\s*\(([^)]+)\)\s*$", text)
+    if m:
+        text, club = m.group(1), norm(m.group(2))
+    want = norm(text)
+    cands = []
+    for pid, p in elements.items():
+        names = {norm(p.get("web_name", "")), norm(p.get("second_name", "")),
+                 norm(f"{p.get('first_name', '')} {p.get('second_name', '')}")}
+        if want in names:
+            t = teams.get(p["team"], {})
+            if club and club not in (norm(t.get("short_name", "")), norm(t.get("name", ""))):
+                continue
+            cands.append(pid)
+    cands = [c for c in cands if c not in exclude] or cands
+    if not cands:
+        return None
+    for c in cands:
+        if c in prefer:
+            return c
+    return max(cands, key=lambda c: _f(elements[c].get("selected_by_percent")))
+
+
 # --------------------------------------------------------------------------- competition for places
 
 REGULAR_PRICE = {1: 5.0, 2: 5.0, 3: 6.0, 4: 6.5}  # a player this pricey is normally a first-choice starter
@@ -622,12 +663,12 @@ def pick_plan(opts: Dict[str, Any], ft: int) -> Dict[str, Any]:
         s = opts["singles"][0]
         hits = max(0, 1 - ft) * HIT_COST
         plans.append({"kind": "single", "transfers": 1, "hits": hits, "gain": s["gain"],
-                      "net": s["gain"] - hits + (roll if ft >= 2 else 0.0), "moves": s})
+                      "net": s["gain"] - hits - HIT_MARGIN * hits / HIT_COST + (roll if ft >= 2 else 0.0), "moves": s})
     if opts["doubles"]:
         d = opts["doubles"][0]
         hits = max(0, 2 - ft) * HIT_COST
         plans.append({"kind": "double", "transfers": 2, "hits": hits, "gain": d["gain"],
-                      "net": d["gain"] - hits + (roll if ft >= 3 else 0.0), "moves": d})
+                      "net": d["gain"] - hits - HIT_MARGIN * hits / HIT_COST + (roll if ft >= 3 else 0.0), "moves": d})
     best = max(plans, key=lambda p: p["net"])
     return {"best": best, "plans": plans, "roll_value": roll}
 
@@ -748,7 +789,8 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                  notes: Optional[List[str]] = None,
                  recent: Optional[Dict[int, Dict[str, Any]]] = None,
                  core: Optional[Dict[str, Any]] = None,
-                 briefing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 briefing: Optional[Dict[str, Any]] = None,
+                 pending: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     notes = list(notes or [])
     events = bootstrap.get("events") or []
     ev_by_id = {e["id"]: e for e in events}
@@ -810,6 +852,41 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     if transfers is None:
         notes.append("Selling prices are estimated from start-of-season prices.")
     ft = estimate_free_transfers(history, chips_by_event)
+
+    # Transfers already made for the next gameweek. FPL's public data only shows them after the
+    # deadline, so they're listed in pending_transfers.json and applied here until then.
+    pending_applied: List[Dict[str, Any]] = []
+    pending_problems: List[str] = []
+    if pending and pending.get("gameweek") == next_gw and int(_f(eh.get("event"))) < next_gw:
+        for mv in pending.get("moves") or []:
+            o = resolve_player(mv.get("out"), elements, teams, prefer=squad)
+            i = resolve_player(mv.get("in"), elements, teams, exclude=squad)
+            if o is None or o not in squad:
+                pending_problems.append(f"couldn't find '{mv.get('out')}' in your squad")
+                continue
+            if i is None:
+                pending_problems.append(f"couldn't find '{mv.get('in')}'")
+                continue
+            if pos[i] != pos[o]:
+                pending_problems.append(f"{elements[o]['web_name']} and {elements[i]['web_name']} play different positions")
+                continue
+            bank += sell[o] - int(_f(elements[i].get("now_cost")))
+            squad[squad.index(o)] = i
+            if o in current_xi:
+                current_xi[current_xi.index(o)] = i
+            if current_cap == o:
+                current_cap = i
+            sell[i] = int(_f(elements[i].get("now_cost")))
+            del sell[o]
+            pending_applied.append({"out": elements[o]["web_name"], "in": elements[i]["web_name"]})
+        if pending_applied:
+            hits = max(0, len(pending_applied) - ft) * HIT_COST
+            notes.insert(0, "Includes the transfers you've made for GW{}: {}{}.".format(
+                next_gw, ", ".join(f"{m['out']} → {m['in']}" for m in pending_applied),
+                f" (a −{hits} hit)" if hits else ""))
+            ft = max(0, ft - len(pending_applied))
+        for prob in pending_problems:
+            notes.insert(0, f"Pending transfer skipped: {prob}. Check pending_transfers.json.")
     squad_sell_value = sum(sell.values())
 
     def fixtures_for(team: int, gws: Sequence[int]) -> List[List[Dict[str, Any]]]:
@@ -1283,7 +1360,10 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
     actions: List[str] = []
     best = plan["best"]
     if best["kind"] == "roll":
-        actions.append(f"Transfers: no move clearly beats saving your free transfer. Roll it (you'd have {min(ft + 1, 5)} next week).")
+        if pending_applied and ft == 0:
+            actions.append("Transfers: you've used your free transfers this week, and no further move is worth a points hit.")
+        else:
+            actions.append(f"Transfers: no move clearly beats saving your free transfer. Roll it (you'd have {min(ft + 1, 5)} next week).")
     else:
         mv = move_view(best["moves"])
         outs = ", ".join(o["name"] for o in mv["out"])
@@ -1354,6 +1434,7 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
             "squad_value": _price(squad_sell_value),
             "team_value": _price(sum(elements[i]["now_cost"] for i in squad)),
             "picks_gw": eh.get("event"),
+            "pending_transfers": pending_applied,
             "notes": notes + ([f"Match data (xG by match, recent form, defensive actions): FPL-Core-Insights, GW1–{max((m['gw'] for ms in core['team_matches'].values() for m in ms), default=0)}."]
                               if core and core.get("team_matches") else ["Match-level data unavailable this run; using FPL season totals."]) + ["Free transfers are estimated from your transfer history.",
                               "Transfers you've already made for the next GW aren't visible until the deadline passes."],

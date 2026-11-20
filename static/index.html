@@ -603,6 +603,12 @@ function settings(){
    ${edit?`<a href="${esc(edit)}" target="_blank" rel="noopener"><button type="button">Edit teams on GitHub</button></a>`:""}`
    :`<p class="small">Running locally: type any team ID at the top and press Analyse. Recent IDs appear as buttons.</p>`}
    </div>
+   <div class="card"><h2>Transfers made this week</h2>
+   <p class="small">FPL only shows your new transfers publicly after the deadline. List them here and the advice updates straight away. It switches back to FPL's own data automatically once the deadline passes.</p>
+   ${(()=>{const P=(D&&D.meta.pending_transfers)||[];return P.length?`<p class="small"><b>Included now for ${esc(D.manager.team_name)}:</b> ${P.map(m=>`${esc(m.out)} → ${esc(m.in)}`).join(", ")}</p>`:`<p class="small muted">None listed for ${esc(D?D.manager.team_name:"this team")}.</p>`})()}
+   ${repo?`<ol class="small" style="padding-left:18px;margin:6px 0 12px"><li>Press the button. GitHub opens the file.</li><li>Under your team ID, add each transfer, e.g. <code>"moves": [{"out": "Thiago", "in": "Barry"}]</code>.</li><li>Press <b>Commit changes</b>. The site updates in about 2 minutes.</li></ol>
+   <a href="https://github.com/${esc(repo)}/edit/main/pending_transfers.json" target="_blank" rel="noopener"><button type="button">Edit transfers on GitHub</button></a>
+   <p class="small muted" style="margin-top:8px">Or just tell Claude which transfers you've made.</p>`:""}</div>
    <div class="card"><h2>Appearance</h2><p class="small">Switch between the dark "floodlights" and light "matchday" themes.</p><button class="ghost" id="theme2">Toggle theme</button>
    <h3>Updates</h3><p class="small">${STATIC?`Updated ${STATIC.built?new Date(STATIC.built).toLocaleString("en-GB",{weekday:"long",hour:"2-digit",minute:"2-digit"}):"–"}. Runs automatically every morning, Friday evening and Saturday morning.${repo?` <a href="https://github.com/${esc(repo)}/actions/workflows/update.yml" target="_blank" rel="noopener">Update now</a>.`:""}`:"Data is fetched live when you press Analyse."}</p></div></div>`;
   document.querySelectorAll("#app [data-team]").forEach(b=>b.onclick=()=>{tab="overview";store.set("tab",tab);showTeam(b.dataset.team)});
