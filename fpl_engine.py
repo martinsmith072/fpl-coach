@@ -885,6 +885,17 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                 next_gw, ", ".join(f"{m['out']} → {m['in']}" for m in pending_applied),
                 f" (a −{hits} hit)" if hits else ""))
             ft = max(0, ft - len(pending_applied))
+        # Optional: the starting XI and captain you've set, so the advice checks your actual lineup.
+        if pending.get("starting"):
+            xi_ids = [resolve_player(n, elements, teams, prefer=squad) for n in pending["starting"]]
+            if len(xi_ids) == 11 and all(x in squad for x in xi_ids):
+                current_xi = xi_ids
+            else:
+                pending_problems.append("the starting XI needs 11 players from your squad")
+        if pending.get("captain"):
+            c = resolve_player(pending["captain"], elements, teams, prefer=squad)
+            if c in squad:
+                current_cap = c
         for prob in pending_problems:
             notes.insert(0, f"Pending transfer skipped: {prob}. Check pending_transfers.json.")
     squad_sell_value = sum(sell.values())
@@ -1260,7 +1271,16 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
         else:
             rec_gw = best_gw
             any_blank_or_double = any(x["playing"] < 15 or x["doubles"] for x in window)
-            if name == "freehit" and best_val < threshold and not any_blank_or_double:
+            vals_sorted = sorted(v for _, v, _ in vals)
+            median_val = vals_sorted[len(vals_sorted) // 2]
+            flat = name in ("bboost", "3xc") and not any_blank_or_double and max(vals_sorted) - median_val < 1.0
+            if flat and weeks_left > 3:
+                # Every week is about the same: keep the chip in case a double gameweek is announced.
+                status = "hold"
+                rec_gw = max((v for v in vals if v[0] < stop), key=lambda v: (v[1], -v[0]), default=vals[-1])[0]
+                verdict = (f"No week stands out: every week until GW{stop} is worth about +{median_val:.0f} pts. "
+                           f"Hold it in case a double gameweek is announced; if none is, use it by GW{stop - 1}")
+            elif name == "freehit" and best_val < threshold and not any_blank_or_double:
                 status = "hold"
                 verdict = (f"No blank or double gameweeks before GW{min(stop, window[-1]['gw'])}, so there's no ideal Free Hit week. "
                            f"Keep it as emergency cover in case injuries or suspensions pile up. If it's still unused, the best week is GW{best_gw}")
@@ -1288,11 +1308,14 @@ def build_advice(bootstrap: Dict[str, Any], fixtures: List[Dict[str, Any]], entr
                     verdict += f". Note: {', '.join(dead)} would score 0 on your bench; a playing backup adds about 3–4 pts"
             if name == "freehit" and rec_gw == next_gw and now_val >= threshold:
                 row["draft"] = [player_view(i) for i in sorted(freehit_eval(0)["squad"], key=lambda i: (pos[i], -lp[i][0]))]
-        cover = name == "freehit" and status == "hold" and "emergency cover" in verdict
+        cover = (name == "freehit" and status == "hold" and "emergency cover" in verdict) or \
+                (name in ("bboost", "3xc") and status == "hold" and "No week stands out" in verdict)
         row["values"] = [{"gw": g, "value": _r(v, 1), "note": n, "rec": g == rec_gw and not cover} for g, v, n in vals]
         row.update(status=status, verdict=verdict, score=best_val / threshold, best_gw=rec_gw,
                    best_value=_r(dict((g, v) for g, v, _ in vals)[rec_gw], 1),
-                   rec_label=(f"Emergency cover · use by GW{stop}" if cover else f"GW{rec_gw}" + (" (this week)" if rec_gw == next_gw else "")))
+                   rec_label=((f"Emergency cover · use by GW{stop}" if name == "freehit" else f"Hold · use by GW{stop - 1}")
+                              if cover else f"Optional · use by GW{stop}" if name == "wildcard" and status == "hold"
+                              else f"GW{rec_gw}" + (" (this week)" if rec_gw == next_gw else "")))
         chip_rows.append(row)
 
     # Collapse chip rows: keep the one that matters now for each chip type.
